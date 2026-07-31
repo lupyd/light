@@ -4,7 +4,6 @@ import { ConnectionClosedError, LightRPCError, MaxRetriesExceededError } from '.
 import { RpcEngine } from './rpc';
 import type {
   ConnectionState,
-  InferRpcParams,
   InferRpcReturn,
   LightPeerEvents,
   LightPeerOptions,
@@ -39,8 +38,8 @@ export class LightPeer<
   private retryCount = 0;
   private isReconnecting = false;
   private isClosed = false;
-  private reconnectTimer: any = null;
-  private attemptTimer: any = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private attemptTimer: ReturnType<typeof setTimeout> | null = null;
 
   private pendingIceCandidates: RTCIceCandidateInit[] = [];
 
@@ -139,8 +138,9 @@ export class LightPeer<
         type: 'offer',
         sdp: offer.sdp || '',
       });
-    } catch (err: any) {
-      this.emit('error', new LightRPCError(`Failed to create offer: ${err?.message || err}`));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emit('error', new LightRPCError(`Failed to create offer: ${message}`));
     }
   }
 
@@ -191,20 +191,21 @@ export class LightPeer<
           }
         }
       }
-    } catch (err: any) {
-      this.emit('error', new LightRPCError(`Error handling signal [${signal.type}]: ${err?.message || err}`));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emit('error', new LightRPCError(`Error handling signal [${signal.type}]: ${message}`));
     }
   }
 
   /**
-   * Perform an RPC call to the remote peer.
+   * Perform an RPC call to the remote peer with binary Uint8Array data.
    * Queues call seamlessly if disconnected or connecting, sending once reconnected.
    */
   public call<K extends keyof TRemoteSchema & string>(
     method: K,
-    ...args: InferRpcParams<TRemoteSchema, K>
+    data?: Uint8Array
   ): Promise<InferRpcReturn<TRemoteSchema, K>> {
-    return this.rpcEngine.call(method, ...args);
+    return this.rpcEngine.call(method, data);
   }
 
   /**
@@ -232,30 +233,30 @@ export class LightPeer<
   }
 
   /**
-   * Send an unreliable datagram to the remote peer.
+   * Send an unreliable datagram with binary Uint8Array payload.
    */
-  public sendDatagram(topic: string, payload: any): boolean {
+  public sendDatagram(topic: string, payload: Uint8Array): boolean {
     return this.datagramEngine.sendDatagram(topic, payload);
   }
 
   /**
-   * Send raw datagram buffer or string.
+   * Send raw datagram buffer.
    */
-  public sendRawDatagram(data: string | ArrayBuffer | Uint8Array): boolean {
+  public sendRawDatagram(data: ArrayBuffer | Uint8Array): boolean {
     return this.datagramEngine.sendRawDatagram(data);
   }
 
   /**
    * Subscribe to incoming datagrams for a specific topic.
    */
-  public onDatagram(topic: string, callback: (payload: any, timestamp: number) => void): () => void {
+  public onDatagram(topic: string, callback: (payload: Uint8Array, timestamp: number) => void): () => void {
     return this.datagramEngine.onDatagram(topic, callback);
   }
 
   /**
    * Unsubscribe from datagrams for a specific topic.
    */
-  public offDatagram(topic: string, callback: (payload: any, timestamp: number) => void): void {
+  public offDatagram(topic: string, callback: (payload: Uint8Array, timestamp: number) => void): void {
     this.datagramEngine.offDatagram(topic, callback);
   }
 
@@ -309,14 +310,14 @@ export class LightPeer<
     event: E,
     listener: LightPeerEvents<TLocalSchema, TRemoteSchema>[E]
   ): this {
-    return super.on(event, listener as any);
+    return super.on(event, listener as (...args: unknown[]) => void);
   }
 
   public override off<E extends keyof LightPeerEvents<TLocalSchema, TRemoteSchema>>(
     event: E,
     listener: LightPeerEvents<TLocalSchema, TRemoteSchema>[E]
   ): this {
-    return super.off(event, listener as any);
+    return super.off(event, listener as (...args: unknown[]) => void);
   }
 
   public override emit<E extends keyof LightPeerEvents<TLocalSchema, TRemoteSchema>>(
@@ -352,15 +353,12 @@ export class LightPeer<
       if (event.candidate) {
         this.emitSignal({
           type: 'candidate',
-          candidate:
-            typeof (event.candidate as any).toJSON === 'function'
-              ? (event.candidate as any).toJSON()
-              : {
-                  candidate: event.candidate.candidate,
-                  sdpMid: event.candidate.sdpMid,
-                  sdpMLineIndex: event.candidate.sdpMLineIndex,
-                  usernameFragment: (event.candidate as any).usernameFragment,
-                },
+          candidate: {
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+            usernameFragment: (event.candidate as RTCIceCandidate & { usernameFragment?: string }).usernameFragment,
+          },
         });
       }
     };
@@ -426,8 +424,9 @@ export class LightPeer<
           }
         }, this.reconnectTimeout);
 
-      } catch (err: any) {
-        this.emit('error', new LightRPCError(`Reconnection attempt ${this.retryCount} failed: ${err?.message || err}`));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.emit('error', new LightRPCError(`Reconnection attempt ${this.retryCount} failed: ${message}`));
         this.isReconnecting = false;
         this.handleDisconnect();
       }
@@ -479,12 +478,14 @@ export class LightPeer<
       this.rpcEngine.onChannelOpen();
     };
 
-    if (channel.readyState === 'open' || (channel as any).state === 'open') {
+    const chanState = (channel as RTCDataChannel & { state?: string }).state;
+    if (channel.readyState === 'open' || chanState === 'open') {
       onOpen();
     } else {
       channel.onopen = onOpen;
-      if (typeof (channel as any).on === 'function') {
-        (channel as any).on('open', onOpen);
+      const chanWithOn = channel as RTCDataChannel & { on?: (evt: string, fn: () => void) => void };
+      if (typeof chanWithOn.on === 'function') {
+        chanWithOn.on('open', onOpen);
       }
     }
 

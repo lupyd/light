@@ -1,4 +1,5 @@
 import { ConnectionClosedError, LightRPCError, MethodNotFoundError, RpcExecutionError, RpcTimeoutError, } from './errors';
+import { decodeRpcMessage, encodeRpcMessage, normalizeRawMessage, } from './proto/protocol';
 export class RpcEngine {
     handlers = new Map();
     pendingRequests = new Map();
@@ -18,14 +19,26 @@ export class RpcEngine {
      */
     setChannel(channel) {
         this.channel = channel;
-        if (this.channel && this.channel.readyState === 'open') {
-            this.flushQueue();
+        if (this.channel) {
+            try {
+                this.channel.binaryType = 'arraybuffer';
+            }
+            catch { }
+            if (this.channel.readyState === 'open') {
+                this.flushQueue();
+            }
         }
     }
     /**
      * Called when the RTCDataChannel opens.
      */
     onChannelOpen() {
+        if (this.channel) {
+            try {
+                this.channel.binaryType = 'arraybuffer';
+            }
+            catch { }
+        }
         this.flushQueue();
     }
     /**
@@ -35,7 +48,7 @@ export class RpcEngine {
         this.channel = null;
     }
     /**
-     * Flush and send all queued RPC requests and responses over the open data channel.
+     * Flush and send all queued Protobuf RPC requests and responses over the open binary data channel.
      */
     flushQueue() {
         if (!this.channel || this.channel.readyState !== 'open' || this.isDestroyed) {
@@ -49,7 +62,7 @@ export class RpcEngine {
         const queue = [...this.queuedRequests];
         this.queuedRequests = [];
         for (const req of queue) {
-            this.sendRequest(req.id, req.method, req.params, req.resolve, req.reject);
+            this.sendRequest(req.id, req.method, req.payload, req.resolve, req.reject);
         }
     }
     /**
@@ -77,30 +90,31 @@ export class RpcEngine {
         this.handlers.delete(method);
     }
     /**
-     * Call an RPC method on the remote peer with strict type safety.
-     * If disconnected or connecting, queues the call until reconnected.
+     * Call an RPC method on the remote peer with binary Uint8Array payload.
      */
-    async call(method, ...args) {
+    async call(method, data) {
         if (this.isDestroyed) {
             throw new ConnectionClosedError('RPC engine is destroyed');
         }
         const requestId = this.generateId();
+        const payload = data || new Uint8Array(0);
         return new Promise((resolve, reject) => {
+            const resolver = (val) => resolve(val);
             if (this.channel && this.channel.readyState === 'open') {
-                this.sendRequest(requestId, method, args, resolve, reject);
+                this.sendRequest(requestId, method, payload, resolver, reject);
             }
             else {
                 this.queuedRequests.push({
                     id: requestId,
                     method,
-                    params: args,
-                    resolve,
+                    payload,
+                    resolve: resolver,
                     reject,
                 });
             }
         });
     }
-    sendRequest(requestId, method, args, resolve, reject) {
+    sendRequest(requestId, method, payload, resolve, reject) {
         const timeoutMs = this.defaultTimeout;
         const timer = setTimeout(() => {
             this.pendingRequests.delete(requestId);
@@ -112,19 +126,22 @@ export class RpcEngine {
             timer,
             method,
         });
-        const requestMessage = {
-            type: 'rpc_request',
-            id: requestId,
-            method,
-            params: args,
+        const requestMsg = {
+            request: {
+                id: requestId,
+                method,
+                payload,
+            },
         };
         try {
-            this.channel.send(JSON.stringify(requestMessage));
+            const encodedBuffer = encodeRpcMessage(requestMsg);
+            this.channel.send(encodedBuffer);
         }
         catch (err) {
             clearTimeout(timer);
             this.pendingRequests.delete(requestId);
-            reject(new LightRPCError(`Failed to send RPC request: ${err?.message || err}`));
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            reject(new LightRPCError(`Failed to send RPC request: ${errorMessage}`));
         }
     }
     /**
@@ -139,102 +156,100 @@ export class RpcEngine {
         this.outboundResponsesQueue = [];
     }
     /**
-     * Handle incoming serialized WebRTC data messages.
+     * Handle incoming binary WebRTC data messages.
      */
     handleMessage(rawMessage) {
-        let message;
         try {
-            let str;
-            if (typeof rawMessage === 'string') {
-                str = rawMessage;
+            const bytes = normalizeRawMessage(rawMessage);
+            if (bytes.length === 0)
+                return;
+            const message = decodeRpcMessage(bytes);
+            if (message.request && message.request.id) {
+                this.handleIncomingRequest(message.request);
             }
-            else if (rawMessage instanceof Uint8Array || ArrayBuffer.isView(rawMessage)) {
-                str = new TextDecoder().decode(rawMessage);
+            else if (message.response && message.response.id) {
+                this.handleIncomingResponse(message.response);
             }
-            else if (rawMessage instanceof ArrayBuffer) {
-                str = new TextDecoder().decode(rawMessage);
-            }
-            else {
-                str = String(rawMessage);
-            }
-            message = JSON.parse(str);
         }
         catch {
-            // Ignore malformed messages
             return;
         }
-        if (message.type === 'rpc_request') {
-            this.handleIncomingRequest(message);
-        }
-        else if (message.type === 'rpc_response') {
-            this.handleIncomingResponse(message);
-        }
     }
-    async handleIncomingRequest(msg) {
-        const handler = this.handlers.get(msg.method);
+    async handleIncomingRequest(req) {
+        const handler = this.handlers.get(req.method);
         if (!handler) {
-            const errorResponse = {
-                type: 'rpc_response',
-                id: msg.id,
-                error: {
-                    code: 'METHOD_NOT_FOUND',
-                    message: `RPC method '${msg.method}' is not registered on receiver peer`,
+            const errorMsg = {
+                response: {
+                    id: req.id,
+                    error: {
+                        code: 'METHOD_NOT_FOUND',
+                        message: `RPC method '${req.method}' is not registered on receiver peer`,
+                    },
                 },
             };
-            this.sendRaw(errorResponse);
+            this.sendRaw(errorMsg);
             return;
         }
         try {
-            const result = await handler(...(msg.params || []));
-            const successResponse = {
-                type: 'rpc_response',
-                id: msg.id,
-                result: result === undefined ? null : result,
-            };
-            this.sendRaw(successResponse);
-        }
-        catch (err) {
-            const errorResponse = {
-                type: 'rpc_response',
-                id: msg.id,
-                error: {
-                    code: err?.code || 'REMOTE_EXECUTION_ERROR',
-                    message: err?.message || String(err),
-                    data: err?.data,
+            const payload = req.payload || new Uint8Array(0);
+            const rawResult = await handler(payload);
+            const binaryResult = rawResult instanceof Uint8Array ? rawResult : new Uint8Array(0);
+            const successMsg = {
+                response: {
+                    id: req.id,
+                    result: binaryResult,
                 },
             };
-            this.sendRaw(errorResponse);
+            this.sendRaw(successMsg);
+        }
+        catch (err) {
+            const errCode = err?.code || 'REMOTE_EXECUTION_ERROR';
+            const errData = err?.data;
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            const errorMsg = {
+                response: {
+                    id: req.id,
+                    error: {
+                        code: errCode,
+                        message: errorMessage,
+                        data: errData instanceof Uint8Array ? errData : undefined,
+                    },
+                },
+            };
+            this.sendRaw(errorMsg);
         }
     }
-    handleIncomingResponse(msg) {
-        const pending = this.pendingRequests.get(msg.id);
+    handleIncomingResponse(resp) {
+        const pending = this.pendingRequests.get(resp.id);
         if (!pending)
             return;
         clearTimeout(pending.timer);
-        this.pendingRequests.delete(msg.id);
-        if (msg.error) {
-            if (msg.error.code === 'METHOD_NOT_FOUND') {
+        this.pendingRequests.delete(resp.id);
+        if (resp.error && resp.error.code) {
+            if (resp.error.code === 'METHOD_NOT_FOUND') {
                 pending.reject(new MethodNotFoundError(pending.method));
             }
             else {
-                pending.reject(new RpcExecutionError(pending.method, msg.error.message, msg.error.code, msg.error.data));
+                pending.reject(new RpcExecutionError(pending.method, resp.error.message, resp.error.code, resp.error.data));
             }
         }
         else {
-            pending.resolve(msg.result);
+            const resultData = resp.result || new Uint8Array(0);
+            pending.resolve(resultData);
         }
     }
-    sendRaw(data) {
+    sendRaw(msg) {
         if (this.channel && this.channel.readyState === 'open') {
             try {
-                this.channel.send(JSON.stringify(data));
+                const encodedBuffer = encodeRpcMessage(msg);
+                this.channel.send(encodedBuffer);
             }
-            catch (e) {
-                this.outboundResponsesQueue.push(data);
+            catch {
+                this.outboundResponsesQueue.push(msg);
             }
         }
         else {
-            this.outboundResponsesQueue.push(data);
+            this.outboundResponsesQueue.push(msg);
         }
     }
     generateId() {
@@ -247,7 +262,7 @@ export class RpcEngine {
         this.isDestroyed = true;
         const err = new ConnectionClosedError(reason);
         this.rejectQueue(err);
-        for (const [id, pending] of this.pendingRequests.entries()) {
+        for (const pending of this.pendingRequests.values()) {
             clearTimeout(pending.timer);
             pending.reject(err);
         }

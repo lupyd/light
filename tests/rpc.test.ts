@@ -7,17 +7,23 @@ import {
   RpcTimeoutError,
 } from '../src/index';
 
-// Define schemas for two peers
+const textEnc = new TextEncoder();
+const textDec = new TextDecoder();
+
+const encodeJson = (val: any) => textEnc.encode(JSON.stringify(val ?? null));
+const decodeJson = (bytes: Uint8Array) => JSON.parse(textDec.decode(bytes));
+
+// Define 1-argument binary schemas for two peers
 type PeerASchema = {
-  add: (a: number, b: number) => number;
-  greet: (name: string) => string;
-  fail: () => void;
-  delayed: (ms: number) => string;
+  add: (data: Uint8Array) => Uint8Array;
+  greet: (data: Uint8Array) => Uint8Array;
+  fail: (data: Uint8Array) => Uint8Array;
+  delayed: (data: Uint8Array) => Promise<Uint8Array>;
 };
 
 type PeerBSchema = {
-  multiply: (a: number, b: number) => number;
-  ping: () => string;
+  multiply: (data: Uint8Array) => Uint8Array;
+  ping: (data: Uint8Array) => Uint8Array;
 };
 
 function setupConnectedPeers(
@@ -38,30 +44,39 @@ function setupConnectedPeers(
     ...bOptions,
   });
 
-  // Exchange signals directly
   peerA.on('signal', (signal) => peerB.handleSignal(signal));
   peerB.on('signal', (signal) => peerA.handleSignal(signal));
 
   return { peerA, peerB };
 }
 
-describe('LightPeer WebRTC RPC & Datagrams', () => {
-  it('should connect two peers and execute RPC calls in both directions', async () => {
+describe('LightPeer WebRTC Binary RPC & Datagrams', () => {
+  it('should connect two peers and execute binary RPC calls in both directions', async () => {
     const peerAHandlers: PeerASchema = {
-      add: (a, b) => a + b,
-      greet: (name) => `Hello, ${name}!`,
+      add: (data) => {
+        const [a, b] = decodeJson(data);
+        return encodeJson(a + b);
+      },
+      greet: (data) => {
+        const name = decodeJson(data);
+        return encodeJson(`Hello, ${name}!`);
+      },
       fail: () => {
         throw new Error('Handler deliberately failed');
       },
-      delayed: async (ms) => {
+      delayed: async (data) => {
+        const ms = decodeJson(data);
         await new Promise((r) => setTimeout(r, ms));
-        return 'done';
+        return encodeJson('done');
       },
     };
 
     const peerBHandlers: PeerBSchema = {
-      multiply: (a, b) => a * b,
-      ping: () => 'pong',
+      multiply: (data) => {
+        const [a, b] = decodeJson(data);
+        return encodeJson(a * b);
+      },
+      ping: () => encodeJson('pong'),
     };
 
     const { peerA, peerB } = setupConnectedPeers(peerAHandlers, peerBHandlers);
@@ -72,19 +87,72 @@ describe('LightPeer WebRTC RPC & Datagrams', () => {
     expect(peerA.isReady).toBe(true);
     expect(peerB.isReady).toBe(true);
 
-    // Call Peer B methods from Peer A
-    const multResult = await peerA.call('multiply', 6, 7);
-    expect(multResult).toBe(42);
+    // Call Peer B methods from Peer A with binary argument
+    const multResult = await peerA.call('multiply', encodeJson([6, 7]));
+    expect(decodeJson(multResult)).toBe(42);
 
-    const pingResult = await peerA.call('ping');
-    expect(pingResult).toBe('pong');
+    const pingResult = await peerA.call('ping', new Uint8Array(0));
+    expect(decodeJson(pingResult)).toBe('pong');
 
     // Call Peer A methods from Peer B
-    const addResult = await peerB.call('add', 10, 25);
-    expect(addResult).toBe(35);
+    const addResult = await peerB.call('add', encodeJson([10, 25]));
+    expect(decodeJson(addResult)).toBe(35);
 
-    const greetResult = await peerB.call('greet', 'Alice');
-    expect(greetResult).toBe('Hello, Alice!');
+    const greetResult = await peerB.call('greet', encodeJson('Alice'));
+    expect(decodeJson(greetResult)).toBe('Hello, Alice!');
+
+    peerA.close();
+    peerB.close();
+  });
+
+  it('should support raw binary Uint8Array payloads for RPC calls and Datagrams', async () => {
+    type BinaryASchema = {
+      echoBinary: (data: Uint8Array) => Uint8Array;
+    };
+    type BinaryBSchema = {};
+
+    const peerA = new LightPeer<BinaryASchema, BinaryBSchema>({
+      initiator: true,
+      handlers: {
+        echoBinary: (data: Uint8Array) => {
+          expect(data).toBeInstanceOf(Uint8Array);
+          const response = new Uint8Array(data.length);
+          for (let i = 0; i < data.length; i++) {
+            response[i] = data[i] + 1;
+          }
+          return response;
+        },
+      },
+    });
+
+    const peerB = new LightPeer<BinaryBSchema, BinaryASchema>({
+      initiator: false,
+    });
+
+    peerA.on('signal', (s) => peerB.handleSignal(s));
+    peerB.on('signal', (s) => peerA.handleSignal(s));
+
+    await peerA.connect();
+    await Promise.all([peerA.waitUntilReady(), peerB.waitUntilReady()]);
+
+    const input = new Uint8Array([10, 20, 30, 40]);
+    const output = await peerB.call('echoBinary', input);
+
+    expect(output).toBeInstanceOf(Uint8Array);
+    expect(Array.from(output)).toEqual([11, 21, 31, 41]);
+
+    let receivedBinaryDatagram: Uint8Array | null = null;
+    peerB.onDatagram('binary_topic', (payload) => {
+      receivedBinaryDatagram = payload;
+    });
+
+    const datagramBytes = new Uint8Array([255, 254, 253]);
+    peerA.sendDatagram('binary_topic', datagramBytes);
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(receivedBinaryDatagram).toBeInstanceOf(Uint8Array);
+    expect(Array.from(receivedBinaryDatagram!)).toEqual([255, 254, 253]);
 
     peerA.close();
     peerB.close();
@@ -94,39 +162,35 @@ describe('LightPeer WebRTC RPC & Datagrams', () => {
     const peerA = new LightPeer<PeerASchema, PeerBSchema>({
       initiator: true,
       handlers: {
-        add: (a, b) => a + b,
-        greet: (n) => `Hello ${n}`,
-        fail: () => {},
-        delayed: () => '',
+        add: (data) => encodeJson(decodeJson(data)[0] + decodeJson(data)[1]),
+        greet: (data) => encodeJson(`Hello ${decodeJson(data)}`),
+        fail: () => encodeJson(null),
+        delayed: () => Promise.resolve(encodeJson('')),
       },
     });
 
     const peerB = new LightPeer<PeerBSchema, PeerASchema>({
       initiator: false,
       handlers: {
-        multiply: (a, b) => a * b,
-        ping: () => 'pong',
+        multiply: (data) => encodeJson(decodeJson(data)[0] * decodeJson(data)[1]),
+        ping: () => encodeJson('pong'),
       },
     });
 
-    // Wire up signaling
     peerA.on('signal', (signal) => peerB.handleSignal(signal));
     peerB.on('signal', (signal) => peerA.handleSignal(signal));
 
-    // Call methods BEFORE connecting or calling waitUntilReady
-    const multiplyPromise = peerA.call('multiply', 5, 5);
-    const pingPromise = peerA.call('ping');
-    const addPromise = peerB.call('add', 100, 200);
+    const multiplyPromise = peerA.call('multiply', encodeJson([5, 5]));
+    const pingPromise = peerA.call('ping', new Uint8Array(0));
+    const addPromise = peerB.call('add', encodeJson([100, 200]));
 
-    // Now initiate connection
     await peerA.connect();
 
-    // Await all queued promises
     const [multRes, pingRes, addRes] = await Promise.all([multiplyPromise, pingPromise, addPromise]);
 
-    expect(multRes).toBe(25);
-    expect(pingRes).toBe('pong');
-    expect(addRes).toBe(300);
+    expect(decodeJson(multRes)).toBe(25);
+    expect(decodeJson(pingRes)).toBe('pong');
+    expect(decodeJson(addRes)).toBe(300);
 
     peerA.close();
     peerB.close();
@@ -135,7 +199,12 @@ describe('LightPeer WebRTC RPC & Datagrams', () => {
   it('should attempt reconnect and succeed after unexpected disconnect', async () => {
     const peerA = new LightPeer<PeerASchema, PeerBSchema>({
       initiator: true,
-      handlers: { add: (a, b) => a + b, greet: (n) => n, fail: () => {}, delayed: () => '' },
+      handlers: {
+        add: (d) => encodeJson(0),
+        greet: (d) => encodeJson(''),
+        fail: () => encodeJson(null),
+        delayed: () => Promise.resolve(encodeJson('')),
+      },
       autoReconnect: true,
       reconnectDelay: 50,
       maxRetries: 3,
@@ -143,7 +212,10 @@ describe('LightPeer WebRTC RPC & Datagrams', () => {
 
     const peerB = new LightPeer<PeerBSchema, PeerASchema>({
       initiator: false,
-      handlers: { multiply: (a, b) => a * b, ping: () => 'pong' },
+      handlers: {
+        multiply: (data) => encodeJson(decodeJson(data)[0] * decodeJson(data)[1]),
+        ping: () => encodeJson('pong'),
+      },
       autoReconnect: true,
       reconnectDelay: 50,
       maxRetries: 3,
@@ -162,19 +234,16 @@ describe('LightPeer WebRTC RPC & Datagrams', () => {
 
     expect(peerA.isReady).toBe(true);
 
-    // Trigger disconnect by calling handleDisconnect on peerA
     (peerA as any).handleDisconnect();
 
     expect(reconnectAttempts).toBe(1);
 
-    // Make an RPC call while reconnecting - it should queue up!
-    const callPromise = peerA.call('multiply', 3, 4);
+    const callPromise = peerA.call('multiply', encodeJson([3, 4]));
 
-    // Wait for reconnection to complete
     await peerA.waitUntilReady();
 
     const res = await callPromise;
-    expect(res).toBe(12);
+    expect(decodeJson(res)).toBe(12);
 
     peerA.close();
     peerB.close();
@@ -183,7 +252,12 @@ describe('LightPeer WebRTC RPC & Datagrams', () => {
   it('should retry 3 times and call it quits when reconnection fails', async () => {
     const peerA = new LightPeer<PeerASchema, PeerBSchema>({
       initiator: true,
-      handlers: { add: (a, b) => a + b, greet: (n) => n, fail: () => {}, delayed: () => '' },
+      handlers: {
+        add: (d) => encodeJson(0),
+        greet: (d) => encodeJson(''),
+        fail: () => encodeJson(null),
+        delayed: () => Promise.resolve(encodeJson('')),
+      },
       autoReconnect: true,
       reconnectDelay: 20,
       reconnectTimeout: 50,
@@ -202,10 +276,8 @@ describe('LightPeer WebRTC RPC & Datagrams', () => {
       reconnectFailedFired = true;
     });
 
-    // Make an RPC call without any receiver peer connected
-    const callPromise = peerA.call('multiply', 10, 10);
+    const callPromise = peerA.call('multiply', encodeJson([10, 10]));
 
-    // Trigger disconnect
     (peerA as any).handleDisconnect();
 
     try {
@@ -225,16 +297,16 @@ describe('LightPeer WebRTC RPC & Datagrams', () => {
   it('should handle remote execution errors', async () => {
     const { peerA, peerB } = setupConnectedPeers(
       {
-        add: (a, b) => a + b,
-        greet: (n) => n,
+        add: () => encodeJson(0),
+        greet: () => encodeJson(''),
         fail: () => {
           throw new Error('Something went wrong on server');
         },
-        delayed: (ms) => 'ok',
+        delayed: () => Promise.resolve(encodeJson('')),
       },
       {
-        multiply: (a, b) => a * b,
-        ping: () => 'pong',
+        multiply: () => encodeJson(0),
+        ping: () => encodeJson('pong'),
       }
     );
 
@@ -242,7 +314,7 @@ describe('LightPeer WebRTC RPC & Datagrams', () => {
     await Promise.all([peerA.waitUntilReady(), peerB.waitUntilReady()]);
 
     try {
-      await peerB.call('fail');
+      await peerB.call('fail', new Uint8Array(0));
       expect().fail('Should have thrown RpcExecutionError');
     } catch (err: any) {
       expect(err).toBeInstanceOf(RpcExecutionError);
@@ -256,14 +328,14 @@ describe('LightPeer WebRTC RPC & Datagrams', () => {
   it('should throw MethodNotFoundError for unknown RPC methods', async () => {
     const { peerA, peerB } = setupConnectedPeers(
       {
-        add: (a, b) => a + b,
-        greet: (n) => n,
-        fail: () => {},
-        delayed: (ms) => 'ok',
+        add: () => encodeJson(0),
+        greet: () => encodeJson(''),
+        fail: () => encodeJson(null),
+        delayed: () => Promise.resolve(encodeJson('')),
       },
       {
-        multiply: (a, b) => a * b,
-        ping: () => 'pong',
+        multiply: () => encodeJson(0),
+        ping: () => encodeJson('pong'),
       }
     );
 
@@ -272,7 +344,7 @@ describe('LightPeer WebRTC RPC & Datagrams', () => {
 
     try {
       // @ts-expect-error Calling unhandled method for test
-      await peerA.call('nonExistentMethod');
+      await peerA.call('nonExistentMethod', new Uint8Array(0));
       expect().fail('Should have thrown MethodNotFoundError');
     } catch (err: any) {
       expect(err).toBeInstanceOf(MethodNotFoundError);
@@ -286,27 +358,28 @@ describe('LightPeer WebRTC RPC & Datagrams', () => {
   it('should timeout if method takes too long', async () => {
     const { peerA, peerB } = setupConnectedPeers(
       {
-        add: (a, b) => a + b,
-        greet: (n) => n,
-        fail: () => {},
-        delayed: async (ms) => {
+        add: () => encodeJson(0),
+        greet: () => encodeJson(''),
+        fail: () => encodeJson(null),
+        delayed: async (data) => {
+          const ms = decodeJson(data);
           await new Promise((r) => setTimeout(r, ms));
-          return 'done';
+          return encodeJson('done');
         },
       },
       {
-        multiply: (a, b) => a * b,
-        ping: () => 'pong',
+        multiply: () => encodeJson(0),
+        ping: () => encodeJson('pong'),
       },
       {},
-      { rpcTimeout: 100 } // Set 100ms timeout on peerB
+      { rpcTimeout: 100 }
     );
 
     await peerA.connect();
     await Promise.all([peerA.waitUntilReady(), peerB.waitUntilReady()]);
 
     try {
-      await peerB.call('delayed', 500); // Wait 500ms when timeout is 100ms
+      await peerB.call('delayed', encodeJson(500));
       expect().fail('Should have timed out');
     } catch (err: any) {
       expect(err).toBeInstanceOf(RpcTimeoutError);
@@ -317,27 +390,25 @@ describe('LightPeer WebRTC RPC & Datagrams', () => {
     peerB.close();
   });
 
-  it('should send and receive datagrams', async () => {
+  it('should send and receive binary datagrams', async () => {
     const { peerA, peerB } = setupConnectedPeers(
-      { add: (a, b) => a + b, greet: (n) => n, fail: () => {}, delayed: () => '' },
-      { multiply: (a, b) => a * b, ping: () => 'pong' }
+      { add: () => encodeJson(0), greet: () => encodeJson(''), fail: () => encodeJson(null), delayed: () => Promise.resolve(encodeJson('')) },
+      { multiply: () => encodeJson(0), ping: () => encodeJson('pong') }
     );
 
     await peerA.connect();
     await Promise.all([peerA.waitUntilReady(), peerB.waitUntilReady()]);
 
-    // Small delay to ensure both data channels (RPC and Datagram) are fully ready
     await new Promise((r) => setTimeout(r, 200));
 
     const receivedDatagrams: any[] = [];
     peerB.onDatagram('player_move', (payload) => {
-      receivedDatagrams.push(payload);
+      receivedDatagrams.push(decodeJson(payload));
     });
 
-    peerA.sendDatagram('player_move', { x: 10, y: 20 });
-    peerA.sendDatagram('player_move', { x: 15, y: 25 });
+    peerA.sendDatagram('player_move', encodeJson({ x: 10, y: 20 }));
+    peerA.sendDatagram('player_move', encodeJson({ x: 15, y: 25 }));
 
-    // Give time for datagram messages to be received
     await new Promise((r) => setTimeout(r, 300));
 
     expect(receivedDatagrams.length).toBe(2);

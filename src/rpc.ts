@@ -5,40 +5,42 @@ import {
   RpcExecutionError,
   RpcTimeoutError,
 } from './errors';
+import {
+  decodeRpcMessage,
+  encodeRpcMessage,
+  normalizeRawMessage,
+  type ProtoRpcMessage,
+  type ProtoRpcRequest,
+  type ProtoRpcResponse,
+} from './proto/protocol';
 import type {
-  InferRpcParams,
   InferRpcReturn,
-  RpcMessage,
-  RpcRequestMessage,
-  RpcResponseMessage,
-  RpcResponseMessageError,
-  RpcResponseMessageSuccess,
   RpcSchema,
 } from './types';
 
 interface PendingRequest {
-  resolve: (value: any) => void;
-  reject: (reason: any) => void;
-  timer: any;
+  resolve: (value: Uint8Array) => void;
+  reject: (reason: Error | unknown) => void;
+  timer: ReturnType<typeof setTimeout>;
   method: string;
 }
 
 interface QueuedRequest {
   id: string;
   method: string;
-  params: any[];
-  resolve: (value: any) => void;
-  reject: (reason: any) => void;
+  payload: Uint8Array;
+  resolve: (value: Uint8Array) => void;
+  reject: (reason: Error | unknown) => void;
 }
 
 export class RpcEngine<
   TLocalSchema extends RpcSchema = RpcSchema,
   TRemoteSchema extends RpcSchema = RpcSchema
 > {
-  private handlers: Map<string, Function> = new Map();
+  private handlers: Map<string, (data: Uint8Array) => Uint8Array | Promise<Uint8Array>> = new Map();
   private pendingRequests: Map<string, PendingRequest> = new Map();
   private queuedRequests: QueuedRequest[] = [];
-  private outboundResponsesQueue: RpcResponseMessage[] = [];
+  private outboundResponsesQueue: ProtoRpcMessage[] = [];
   private channel: RTCDataChannel | null = null;
   private defaultTimeout: number;
   private isDestroyed = false;
@@ -55,8 +57,13 @@ export class RpcEngine<
    */
   public setChannel(channel: RTCDataChannel | null): void {
     this.channel = channel;
-    if (this.channel && this.channel.readyState === 'open') {
-      this.flushQueue();
+    if (this.channel) {
+      try {
+        this.channel.binaryType = 'arraybuffer';
+      } catch {}
+      if (this.channel.readyState === 'open') {
+        this.flushQueue();
+      }
     }
   }
 
@@ -64,6 +71,11 @@ export class RpcEngine<
    * Called when the RTCDataChannel opens.
    */
   public onChannelOpen(): void {
+    if (this.channel) {
+      try {
+        this.channel.binaryType = 'arraybuffer';
+      } catch {}
+    }
     this.flushQueue();
   }
 
@@ -75,7 +87,7 @@ export class RpcEngine<
   }
 
   /**
-   * Flush and send all queued RPC requests and responses over the open data channel.
+   * Flush and send all queued Protobuf RPC requests and responses over the open binary data channel.
    */
   public flushQueue(): void {
     if (!this.channel || this.channel.readyState !== 'open' || this.isDestroyed) {
@@ -92,7 +104,7 @@ export class RpcEngine<
     this.queuedRequests = [];
 
     for (const req of queue) {
-      this.sendRequest(req.id, req.method, req.params, req.resolve, req.reject);
+      this.sendRequest(req.id, req.method, req.payload, req.resolve, req.reject);
     }
   }
 
@@ -102,7 +114,7 @@ export class RpcEngine<
   public registerHandlers(handlers: Partial<TLocalSchema> | TLocalSchema): void {
     for (const [method, handler] of Object.entries(handlers)) {
       if (typeof handler === 'function') {
-        this.handlers.set(method, handler);
+        this.handlers.set(method, handler as (data: Uint8Array) => Uint8Array | Promise<Uint8Array>);
       }
     }
   }
@@ -115,7 +127,7 @@ export class RpcEngine<
     handler: TLocalSchema[K]
   ): void {
     if (typeof handler === 'function') {
-      this.handlers.set(method as string, handler);
+      this.handlers.set(method as string, handler as (data: Uint8Array) => Uint8Array | Promise<Uint8Array>);
     }
   }
 
@@ -127,28 +139,30 @@ export class RpcEngine<
   }
 
   /**
-   * Call an RPC method on the remote peer with strict type safety.
-   * If disconnected or connecting, queues the call until reconnected.
+   * Call an RPC method on the remote peer with binary Uint8Array payload.
    */
   public async call<K extends keyof TRemoteSchema & string>(
     method: K,
-    ...args: InferRpcParams<TRemoteSchema, K>
+    data?: Uint8Array
   ): Promise<InferRpcReturn<TRemoteSchema, K>> {
     if (this.isDestroyed) {
       throw new ConnectionClosedError('RPC engine is destroyed');
     }
 
     const requestId = this.generateId();
+    const payload = data || new Uint8Array(0);
 
     return new Promise<InferRpcReturn<TRemoteSchema, K>>((resolve, reject) => {
+      const resolver = (val: Uint8Array) => resolve(val as InferRpcReturn<TRemoteSchema, K>);
+
       if (this.channel && this.channel.readyState === 'open') {
-        this.sendRequest(requestId, method, args, resolve, reject);
+        this.sendRequest(requestId, method, payload, resolver, reject);
       } else {
         this.queuedRequests.push({
           id: requestId,
           method,
-          params: args,
-          resolve,
+          payload,
+          resolve: resolver,
           reject,
         });
       }
@@ -158,9 +172,9 @@ export class RpcEngine<
   private sendRequest(
     requestId: string,
     method: string,
-    args: any[],
-    resolve: (value: any) => void,
-    reject: (reason: any) => void
+    payload: Uint8Array,
+    resolve: (value: Uint8Array) => void,
+    reject: (reason: Error | unknown) => void
   ): void {
     const timeoutMs = this.defaultTimeout;
 
@@ -176,19 +190,22 @@ export class RpcEngine<
       method,
     });
 
-    const requestMessage: RpcRequestMessage = {
-      type: 'rpc_request',
-      id: requestId,
-      method,
-      params: args,
+    const requestMsg: ProtoRpcMessage = {
+      request: {
+        id: requestId,
+        method,
+        payload,
+      },
     };
 
     try {
-      this.channel!.send(JSON.stringify(requestMessage));
-    } catch (err: any) {
+      const encodedBuffer = encodeRpcMessage(requestMsg);
+      this.channel!.send(encodedBuffer as unknown as ArrayBuffer);
+    } catch (err) {
       clearTimeout(timer);
       this.pendingRequests.delete(requestId);
-      reject(new LightRPCError(`Failed to send RPC request: ${err?.message || err}`));
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      reject(new LightRPCError(`Failed to send RPC request: ${errorMessage}`));
     }
   }
 
@@ -205,101 +222,104 @@ export class RpcEngine<
   }
 
   /**
-   * Handle incoming serialized WebRTC data messages.
+   * Handle incoming binary WebRTC data messages.
    */
-  public handleMessage(rawMessage: any): void {
-    let message: RpcMessage;
+  public handleMessage(rawMessage: unknown): void {
     try {
-      let str: string;
-      if (typeof rawMessage === 'string') {
-        str = rawMessage;
-      } else if (rawMessage instanceof Uint8Array || ArrayBuffer.isView(rawMessage)) {
-        str = new TextDecoder().decode(rawMessage);
-      } else if (rawMessage instanceof ArrayBuffer) {
-        str = new TextDecoder().decode(rawMessage);
-      } else {
-        str = String(rawMessage);
-      }
-      message = JSON.parse(str);
-    } catch {
-      // Ignore malformed messages
-      return;
-    }
+      const bytes = normalizeRawMessage(rawMessage);
+      if (bytes.length === 0) return;
 
-    if (message.type === 'rpc_request') {
-      this.handleIncomingRequest(message);
-    } else if (message.type === 'rpc_response') {
-      this.handleIncomingResponse(message);
+      const message = decodeRpcMessage(bytes);
+
+      if (message.request && message.request.id) {
+        this.handleIncomingRequest(message.request);
+      } else if (message.response && message.response.id) {
+        this.handleIncomingResponse(message.response);
+      }
+    } catch {
+      return;
     }
   }
 
-  private async handleIncomingRequest(msg: RpcRequestMessage): Promise<void> {
-    const handler = this.handlers.get(msg.method);
+  private async handleIncomingRequest(req: ProtoRpcRequest): Promise<void> {
+    const handler = this.handlers.get(req.method);
 
     if (!handler) {
-      const errorResponse: RpcResponseMessageError = {
-        type: 'rpc_response',
-        id: msg.id,
-        error: {
-          code: 'METHOD_NOT_FOUND',
-          message: `RPC method '${msg.method}' is not registered on receiver peer`,
+      const errorMsg: ProtoRpcMessage = {
+        response: {
+          id: req.id,
+          error: {
+            code: 'METHOD_NOT_FOUND',
+            message: `RPC method '${req.method}' is not registered on receiver peer`,
+          },
         },
       };
-      this.sendRaw(errorResponse);
+      this.sendRaw(errorMsg);
       return;
     }
 
     try {
-      const result = await handler(...(msg.params || []));
-      const successResponse: RpcResponseMessageSuccess = {
-        type: 'rpc_response',
-        id: msg.id,
-        result: result === undefined ? null : result,
-      };
-      this.sendRaw(successResponse);
-    } catch (err: any) {
-      const errorResponse: RpcResponseMessageError = {
-        type: 'rpc_response',
-        id: msg.id,
-        error: {
-          code: err?.code || 'REMOTE_EXECUTION_ERROR',
-          message: err?.message || String(err),
-          data: err?.data,
+      const payload = req.payload || new Uint8Array(0);
+      const rawResult = await handler(payload);
+      const binaryResult = rawResult instanceof Uint8Array ? rawResult : new Uint8Array(0);
+
+      const successMsg: ProtoRpcMessage = {
+        response: {
+          id: req.id,
+          result: binaryResult,
         },
       };
-      this.sendRaw(errorResponse);
+      this.sendRaw(successMsg);
+    } catch (err) {
+      const errCode = (err as { code?: string })?.code || 'REMOTE_EXECUTION_ERROR';
+      const errData = (err as { data?: unknown })?.data;
+      const errorMessage = err instanceof Error ? err.message : String(err);
+
+      const errorMsg: ProtoRpcMessage = {
+        response: {
+          id: req.id,
+          error: {
+            code: errCode,
+            message: errorMessage,
+            data: errData instanceof Uint8Array ? errData : undefined,
+          },
+        },
+      };
+      this.sendRaw(errorMsg);
     }
   }
 
-  private handleIncomingResponse(msg: RpcResponseMessage): void {
-    const pending = this.pendingRequests.get(msg.id);
+  private handleIncomingResponse(resp: ProtoRpcResponse): void {
+    const pending = this.pendingRequests.get(resp.id);
     if (!pending) return;
 
     clearTimeout(pending.timer);
-    this.pendingRequests.delete(msg.id);
+    this.pendingRequests.delete(resp.id);
 
-    if (msg.error) {
-      if (msg.error.code === 'METHOD_NOT_FOUND') {
+    if (resp.error && resp.error.code) {
+      if (resp.error.code === 'METHOD_NOT_FOUND') {
         pending.reject(new MethodNotFoundError(pending.method));
       } else {
         pending.reject(
-          new RpcExecutionError(pending.method, msg.error.message, msg.error.code, msg.error.data)
+          new RpcExecutionError(pending.method, resp.error.message, resp.error.code, resp.error.data)
         );
       }
     } else {
-      pending.resolve(msg.result);
+      const resultData = resp.result || new Uint8Array(0);
+      pending.resolve(resultData);
     }
   }
 
-  private sendRaw(data: RpcResponseMessage): void {
+  private sendRaw(msg: ProtoRpcMessage): void {
     if (this.channel && this.channel.readyState === 'open') {
       try {
-        this.channel.send(JSON.stringify(data));
-      } catch (e) {
-        this.outboundResponsesQueue.push(data);
+        const encodedBuffer = encodeRpcMessage(msg);
+        this.channel.send(encodedBuffer as unknown as ArrayBuffer);
+      } catch {
+        this.outboundResponsesQueue.push(msg);
       }
     } else {
-      this.outboundResponsesQueue.push(data);
+      this.outboundResponsesQueue.push(msg);
     }
   }
 
@@ -316,7 +336,7 @@ export class RpcEngine<
 
     this.rejectQueue(err);
 
-    for (const [id, pending] of this.pendingRequests.entries()) {
+    for (const pending of this.pendingRequests.values()) {
       clearTimeout(pending.timer);
       pending.reject(err);
     }

@@ -1,17 +1,12 @@
-export type RpcFunction = (...args: any[]) => any;
+export type RpcFunction = (data: Uint8Array) => Uint8Array | Promise<Uint8Array>;
 
 export type RpcSchema = Record<string, RpcFunction>;
 
-// Helper types to infer parameter and return types for RPC calls
-export type InferRpcParams<
-  TSchema extends RpcSchema,
-  K extends keyof TSchema
-> = TSchema[K] extends (...args: infer P) => any ? P : never;
-
+// Helper type to infer return type for RPC calls
 export type InferRpcReturn<
   TSchema extends RpcSchema,
   K extends keyof TSchema
-> = TSchema[K] extends (...args: any[]) => infer R ? Awaited<R> : never;
+> = TSchema[K] extends (data: Uint8Array) => infer R ? Awaited<R> : Uint8Array;
 
 // Signaling message types
 export type SignalData =
@@ -100,43 +95,6 @@ export interface LightPeerOptions<
   reconnectTimeout?: number;
 }
 
-// Protocol Messages
-export interface RpcRequestMessage {
-  type: 'rpc_request';
-  id: string;
-  method: string;
-  params: any[];
-}
-
-export interface RpcResponseMessageSuccess {
-  type: 'rpc_response';
-  id: string;
-  result: any;
-  error?: undefined;
-}
-
-export interface RpcResponseMessageError {
-  type: 'rpc_response';
-  id: string;
-  result?: undefined;
-  error: {
-    code: string;
-    message: string;
-    data?: any;
-  };
-}
-
-export type RpcResponseMessage = RpcResponseMessageSuccess | RpcResponseMessageError;
-
-export type RpcMessage = RpcRequestMessage | RpcResponseMessage;
-
-export interface DatagramMessage {
-  type: 'datagram';
-  topic: string;
-  payload: any;
-  timestamp: number;
-}
-
 // Peer Events map
 export interface LightPeerEvents<
   TLocalSchema extends RpcSchema = RpcSchema,
@@ -149,5 +107,5 @@ export interface LightPeerEvents<
   ready: () => void;
   close: () => void;
   error: (err: Error) => void;
-  datagram: (event: { topic: string; payload: any; timestamp: number }) => void;
+  datagram: (event: { topic: string; payload: Uint8Array; timestamp: number }) => void;
 }

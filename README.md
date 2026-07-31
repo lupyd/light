@@ -6,6 +6,7 @@ A lightweight, high-performance TypeScript library for reliable **RPC calls** an
 
 ## Key Features
 
+- 📦 **Binary-First Protobuf Framing**: All RPC messages, responses, and datagrams are encoded in compact binary **Protocol Buffers** (`src/proto/protocol.proto`). Supports raw `Uint8Array` payloads natively.
 - 🎯 **Strict Type Safety**: Fully inferred parameter and return types for RPC methods.
 - 🔄 **Seamless Call Queuing**: Calls made while connecting or reconnecting are queued automatically and transmitted once connected.
 - 🔁 **Auto-Reconnection**: Configurable retry logic (defaults to 3 retries) with automatic state recovery.

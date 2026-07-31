@@ -35,12 +35,14 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "protobufjs": "^8.7.1",
     "selfsigned": "^5.5.0",
     "werift": "^0.24.2",
     "ws": "^8.21.1"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
+    "@types/protobufjs": "^6.0.0",
     "@types/selfsigned": "^2.1.0",
     "@types/ws": "^8.18.1",
     "typescript": "^7.0.2"

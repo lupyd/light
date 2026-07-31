@@ -1,41 +1,44 @@
 import readline from 'node:readline';
 import WebSocket from 'ws';
 import { LightPeer } from '../src/index';
-import type { CommonPeerSchema } from './schema';
+import { decodeJson, encodeJson, type CommonPeerSchema } from './schema';
 import { allowSelfSignedCertificates } from './ssl';
 
 allowSelfSignedCertificates();
 
 const SIGNALING_URL = process.env.SIGNALING_URL || 'ws://localhost:3000/ws';
 
-// Parse command line arguments or use defaults
 const args = process.argv.slice(2);
 const MY_ID = args[0] || 'cli-1';
 const PEER_ID = args[1] || 'cli-2';
 const IS_INITIATOR = args[2] === 'true' || args[0] === 'cli-1' || !args[0];
 
 console.log(`\n======================================================`);
-console.log(`🚀 Light WebRTC RPC CLI Client`);
+console.log(`🚀 Light WebRTC Binary RPC CLI Client`);
 console.log(`🆔 ID: '${MY_ID}' | Target Peer: '${PEER_ID}' | Initiator: ${IS_INITIATOR}`);
 console.log(`======================================================\n`);
 
-// Local handlers exposed to remote peers
+// Local binary handlers
 const localHandlers: CommonPeerSchema = {
-  ping: () => 'pong from ' + MY_ID,
-  echo: (msg: string) => `[${MY_ID}] Echo: ${msg}`,
-  add: (a: number, b: number) => Number(a) + Number(b),
-  getSystemInfo: () => ({
-    platform: process.platform,
-    uptime: Math.round(process.uptime()),
-    timestamp: Date.now(),
-  }),
+  ping: () => encodeJson('pong from ' + MY_ID),
+  echo: (data) => encodeJson(`[${MY_ID}] Echo: ${decodeJson(data)}`),
+  add: (data) => {
+    const [a, b] = decodeJson<[number, number]>(data);
+    return encodeJson(Number(a) + Number(b));
+  },
+  getSystemInfo: () =>
+    encodeJson({
+      platform: process.platform,
+      uptime: Math.round(process.uptime()),
+      timestamp: Date.now(),
+    }),
   fetchQuote: () => {
     const quotes = [
-      { quote: "Simplicity is prerequisite for reliability.", author: "Edsger W. Dijkstra" },
-      { quote: "Make it work, make it right, make it fast.", author: "Kent Beck" },
-      { quote: "Code is like humor. When you have to explain it, it's bad.", author: "Cory House" },
+      { quote: 'Simplicity is prerequisite for reliability.', author: 'Edsger W. Dijkstra' },
+      { quote: 'Make it work, make it right, make it fast.', author: 'Kent Beck' },
+      { quote: 'Code is like humor. When you have to explain it, it\'s bad.', author: 'Cory House' },
     ];
-    return quotes[Math.floor(Math.random() * quotes.length)];
+    return encodeJson(quotes[Math.floor(Math.random() * quotes.length)]);
   },
 };
 
@@ -102,16 +105,15 @@ peer.on('ready', () => {
 });
 
 peer.onDatagram('chat', (payload, timestamp) => {
-  console.log(`\n📩 [Datagram: chat] ${payload} (at ${new Date(timestamp).toLocaleTimeString()})`);
+  console.log(`\n📩 [Datagram: chat] ${decodeJson(payload)} (at ${new Date(timestamp).toLocaleTimeString()})`);
   rl.prompt();
 });
 
 peer.onDatagram('mouse_move', (payload) => {
-  console.log(`\n🖱️ [Datagram: mouse_move]`, payload);
+  console.log(`\n🖱️ [Datagram: mouse_move]`, decodeJson(payload));
   rl.prompt();
 });
 
-// Setup Readline REPL for interactive input
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
@@ -191,19 +193,23 @@ Exposed Local Methods:
       }
 
       const rawArgs = parts.slice(2).map((a) => a.replace(/^"|"$/g, ''));
-      let args: any[] = rawArgs;
+      let payload: Uint8Array = new Uint8Array(0);
 
-      // Type conversions for known methods
-      if (method === 'add' && rawArgs.length >= 2) {
-        args = [Number(rawArgs[0]), Number(rawArgs[1])];
+      if (method === 'add') {
+        payload = encodeJson([Number(rawArgs[0] || 0), Number(rawArgs[1] || 0)]);
+      } else if (method === 'echo') {
+        payload = encodeJson(rawArgs.join(' '));
+      } else if (rawArgs.length > 0) {
+        payload = encodeJson(rawArgs[0]);
       }
 
       console.log(`⏳ Calling '${method}' on '${PEER_ID}'...`);
       try {
-        const result = await peer.call(method as any, ...args);
-        console.log(`✨ Result from '${PEER_ID}':`, result);
-      } catch (err: any) {
-        console.error(`❌ RPC Call Failed: ${err.message}`);
+        const resultBytes = await peer.call(method as any, payload);
+        console.log(`✨ Result from '${PEER_ID}':`, decodeJson(resultBytes));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`❌ RPC Call Failed: ${msg}`);
       }
       break;
     }
@@ -212,7 +218,7 @@ Exposed Local Methods:
       const topic = parts[1] || 'chat';
       const message = parts.slice(2).join(' ').replace(/^"|"$/g, '') || 'Hello';
 
-      const sent = peer.sendDatagram(topic, message);
+      const sent = peer.sendDatagram(topic, encodeJson(message));
       console.log(sent ? `📤 Datagram sent to '${PEER_ID}' [${topic}]` : `❌ Failed to send datagram`);
       break;
     }

@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import { LightPeer } from '../src/index';
-import type { ClientASchema, ClientBSchema } from './schema';
+import { decodeJson, encodeJson, type ClientASchema, type ClientBSchema } from './schema';
 import { allowSelfSignedCertificates } from './ssl';
 
 allowSelfSignedCertificates();
@@ -12,18 +12,25 @@ const PEER_ID = 'client-b';
 console.log(`[Client A] Connecting to signaling server at ${SIGNALING_URL}...`);
 const ws = new WebSocket(SIGNALING_URL, { rejectUnauthorized: false });
 
-// Implement local methods that Client B can call on Client A
+// Local binary handlers
 const localHandlers: ClientASchema = {
-  getSystemInfo: () => ({
-    platform: process.platform,
-    uptime: Math.round(process.uptime()),
-  }),
-  calculateSum: (numbers: number[]) => numbers.reduce((acc, curr) => acc + curr, 0),
-  echo: (msg: string) => `Echo: ${msg}`,
+  getSystemInfo: () =>
+    encodeJson({
+      platform: process.platform,
+      uptime: Math.round(process.uptime()),
+    }),
+  calculateSum: (data) => {
+    const numbers: number[] = decodeJson(data);
+    return encodeJson(numbers.reduce((acc, curr) => acc + curr, 0));
+  },
+  echo: (data) => {
+    const msg: string = decodeJson(data);
+    return encodeJson(`Echo: ${msg}`);
+  },
 };
 
 const peer = new LightPeer<ClientASchema, ClientBSchema>({
-  initiator: true, // Client A initiates the WebRTC offer
+  initiator: true,
   handlers: localHandlers,
 });
 
@@ -44,7 +51,6 @@ ws.on('message', async (data: string) => {
   }
 });
 
-// Forward WebRTC signals from LightPeer to Client B via WebSocket
 peer.on('signal', (signal) => {
   console.log(`[Client A] Sending WebRTC signal [${signal.type}] to ${PEER_ID}`);
   ws.send(
@@ -62,27 +68,23 @@ peer.on('connectionStateChange', (state) => {
 });
 
 peer.onDatagram('status_update', (payload, timestamp) => {
-  console.log(`[Client A] Received datagram 'status_update' from B:`, payload);
+  console.log(`[Client A] Received datagram 'status_update' from B:`, decodeJson(payload));
 });
 
-// Run demo once connected
 peer.on('ready', async () => {
   console.log('\n✅ [Client A] WebRTC Data Channels Ready!\n');
 
   try {
-    // 1. Call Client B's greetUser method
     console.log('[Client A] Calling remote method B: greetUser("Alice")...');
-    const greeting = await peer.call('greetUser', 'Alice');
-    console.log('[Client A] Response from B:', greeting);
+    const greetingRes = await peer.call('greetUser', encodeJson('Alice'));
+    console.log('[Client A] Response from B:', decodeJson(greetingRes));
 
-    // 2. Call Client B's processData method
     console.log('[Client A] Calling remote method B: processData({ id: "item-101", data: "payload" })...');
-    const result = await peer.call('processData', { id: 'item-101', data: 'payload' });
-    console.log('[Client A] Response from B:', result);
+    const resultRes = await peer.call('processData', encodeJson({ id: 'item-101', data: 'payload' }));
+    console.log('[Client A] Response from B:', decodeJson(resultRes));
 
-    // 3. Send unreliable datagram
     console.log('[Client A] Sending datagram "mouse_move" to B...');
-    peer.sendDatagram('mouse_move', { x: 120, y: 340, speed: 12.5 });
+    peer.sendDatagram('mouse_move', encodeJson({ x: 120, y: 340, speed: 12.5 }));
 
     setTimeout(() => {
       console.log('✅ [Client A] Tasks completed cleanly.');

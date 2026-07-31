@@ -1,4 +1,4 @@
-import type { InferRpcParams, InferRpcReturn, RpcSchema } from './types';
+import type { InferRpcReturn, RpcSchema } from './types';
 export declare class RpcEngine<TLocalSchema extends RpcSchema = RpcSchema, TRemoteSchema extends RpcSchema = RpcSchema> {
     private handlers;
     private pendingRequests;
@@ -21,7 +21,7 @@ export declare class RpcEngine<TLocalSchema extends RpcSchema = RpcSchema, TRemo
      */
     onChannelClose(): void;
     /**
-     * Flush and send all queued RPC requests and responses over the open data channel.
+     * Flush and send all queued Protobuf RPC requests and responses over the open binary data channel.
      */
     flushQueue(): void;
     /**
@@ -37,19 +37,18 @@ export declare class RpcEngine<TLocalSchema extends RpcSchema = RpcSchema, TRemo
      */
     removeHandler(method: string): void;
     /**
-     * Call an RPC method on the remote peer with strict type safety.
-     * If disconnected or connecting, queues the call until reconnected.
+     * Call an RPC method on the remote peer with binary Uint8Array payload.
      */
-    call<K extends keyof TRemoteSchema & string>(method: K, ...args: InferRpcParams<TRemoteSchema, K>): Promise<InferRpcReturn<TRemoteSchema, K>>;
+    call<K extends keyof TRemoteSchema & string>(method: K, data?: Uint8Array): Promise<InferRpcReturn<TRemoteSchema, K>>;
     private sendRequest;
     /**
      * Reject all queued requests with a given error.
      */
     rejectQueue(reason: Error): void;
     /**
-     * Handle incoming serialized WebRTC data messages.
+     * Handle incoming binary WebRTC data messages.
      */
-    handleMessage(rawMessage: any): void;
+    handleMessage(rawMessage: unknown): void;
     private handleIncomingRequest;
     private handleIncomingResponse;
     private sendRaw;

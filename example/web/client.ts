@@ -1,5 +1,5 @@
 import { LightPeer } from '../../src/index';
-import type { CommonPeerSchema } from '../schema';
+import { decodeJson, encodeJson, type CommonPeerSchema } from '../schema';
 
 // DOM Elements
 const statusBadge = document.getElementById('status-badge') as HTMLSpanElement;
@@ -25,7 +25,6 @@ const consoleLog = document.getElementById('console-log') as HTMLDivElement;
 let peer: LightPeer<CommonPeerSchema, CommonPeerSchema> | null = null;
 let ws: WebSocket | null = null;
 
-// Dynamically set signaling URL to match the website's host and protocol
 if (signalingUrlInput) {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   signalingUrlInput.value = `${wsProtocol}//${window.location.host}/ws`;
@@ -49,7 +48,6 @@ function updateStatus(state: string) {
   btnSendDatagram.disabled = !isReady;
 }
 
-// Auto update default args based on selected method
 rpcMethodSelect.addEventListener('change', () => {
   const method = rpcMethodSelect.value;
   if (method === 'ping' || method === 'getSystemInfo' || method === 'fetchQuote') {
@@ -76,21 +74,25 @@ btnConnect.addEventListener('click', async () => {
   btnConnect.disabled = true;
   btnDisconnect.disabled = false;
 
-  // Define local RPC handlers available to remote peer
   const localHandlers: CommonPeerSchema = {
-    ping: () => 'pong from browser ' + myId,
-    echo: (msg) => `[Browser ${myId}] Echo: ${msg}`,
-    add: (a, b) => Number(a) + Number(b),
-    getSystemInfo: () => ({
-      platform: 'Browser (' + navigator.platform + ')',
-      userAgent: navigator.userAgent,
-      uptime: Math.round(performance.now() / 1000),
-      timestamp: Date.now(),
-    }),
-    fetchQuote: () => ({
-      quote: 'The web is a canvas for imagination.',
-      author: 'Web Peer',
-    }),
+    ping: () => encodeJson('pong from browser ' + myId),
+    echo: (data) => encodeJson(`[Browser ${myId}] Echo: ${decodeJson(data)}`),
+    add: (data) => {
+      const [a, b] = decodeJson<[number, number]>(data);
+      return encodeJson(Number(a) + Number(b));
+    },
+    getSystemInfo: () =>
+      encodeJson({
+        platform: 'Browser (' + navigator.platform + ')',
+        userAgent: navigator.userAgent,
+        uptime: Math.round(performance.now() / 1000),
+        timestamp: Date.now(),
+      }),
+    fetchQuote: () =>
+      encodeJson({
+        quote: 'The web is a canvas for imagination.',
+        author: 'Web Peer',
+      }),
   };
 
   peer = new LightPeer<CommonPeerSchema, CommonPeerSchema>({
@@ -119,14 +121,13 @@ btnConnect.addEventListener('click', async () => {
   });
 
   peer.onDatagram('chat', (payload, timestamp) => {
-    log(`💬 [Datagram Received] Chat: ${JSON.stringify(payload)}`, 'success');
+    log(`💬 [Datagram Received] Chat: ${JSON.stringify(decodeJson(payload))}`, 'success');
   });
 
   peer.onDatagram('mouse_move', (payload) => {
-    log(`🖱️ [Datagram Received] Mouse: ${JSON.stringify(payload)}`, 'info');
+    log(`🖱️ [Datagram Received] Mouse: ${JSON.stringify(decodeJson(payload))}`, 'info');
   });
 
-  // Connect to Signaling Server
   log(`Connecting to WebSocket signaling server: ${signalingUrl}...`, 'info');
   ws = new WebSocket(signalingUrl);
 
@@ -193,25 +194,28 @@ btnCallRpc.addEventListener('click', async () => {
   }
 
   const method = rpcMethodSelect.value;
-  let args: any[] = [];
+  let parsedArgs: unknown = [];
   try {
-    args = JSON.parse(rpcArgsInput.value.trim() || '[]');
-  } catch (e) {
+    parsedArgs = JSON.parse(rpcArgsInput.value.trim() || '[]');
+  } catch {
     alert('Invalid JSON array for arguments!');
     return;
   }
 
-  log(`Calling remote RPC method '${method}' with args: ${JSON.stringify(args)}...`, 'info');
+  log(`Calling remote RPC method '${method}'...`, 'info');
   const startTime = performance.now();
 
   try {
-    const result = await peer.call(method as any, ...args);
+    const payloadBytes = encodeJson(parsedArgs);
+    const resultBytes = await peer.call(method as any, payloadBytes);
+    const resultVal = decodeJson(resultBytes);
     const elapsed = Math.round(performance.now() - startTime);
     log(`✨ RPC Call '${method}' succeeded in ${elapsed}ms`, 'success');
-    rpcResultPre.textContent = JSON.stringify(result, null, 2);
-  } catch (err: any) {
-    log(`❌ RPC Call '${method}' failed: ${err.message}`, 'error');
-    rpcResultPre.textContent = `Error: ${err.message}`;
+    rpcResultPre.textContent = JSON.stringify(resultVal, null, 2);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`❌ RPC Call '${method}' failed: ${msg}`, 'error');
+    rpcResultPre.textContent = `Error: ${msg}`;
   }
 });
 
@@ -222,16 +226,16 @@ btnSendDatagram.addEventListener('click', () => {
   }
 
   const topic = datagramTopicInput.value.trim() || 'chat';
-  let payload: any = datagramPayloadInput.value.trim();
+  let payloadVal: unknown = datagramPayloadInput.value.trim();
   try {
-    payload = JSON.parse(payload);
+    payloadVal = JSON.parse(payloadVal as string);
   } catch {
-    // Treat as raw string if not JSON
+    // Keep as string
   }
 
-  const sent = peer.sendDatagram(topic, payload);
+  const sent = peer.sendDatagram(topic, encodeJson(payloadVal));
   if (sent) {
-    log(`📤 Sent datagram [${topic}]: ${JSON.stringify(payload)}`, 'info');
+    log(`📤 Sent datagram [${topic}]: ${JSON.stringify(payloadVal)}`, 'info');
   } else {
     log(`❌ Failed to send datagram`, 'error');
   }

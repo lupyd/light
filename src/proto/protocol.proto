@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package light.protocol;
+
+// RPC Error details
+message RpcError {
+  string code = 1;
+  string message = 2;
+  bytes data = 3;
+}
+
+// RPC Request message with single binary payload
+message RpcRequest {
+  string id = 1;
+  string method = 2;
+  bytes payload = 3;
+}
+
+// RPC Response message with single binary result
+message RpcResponse {
+  string id = 1;
+  bytes result = 2;
+  RpcError error = 3;
+}
+
+// Top-level RPC Message envelope
+message RpcMessage {
+  oneof payload {
+    RpcRequest request = 1;
+    RpcResponse response = 2;
+  }
+}
+
+// Unreliable Datagram Message with binary payload
+message DatagramMessage {
+  string topic = 1;
+  bytes payload = 2;
+  int64 timestamp = 3;
+}

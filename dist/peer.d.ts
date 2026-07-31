@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import type { ConnectionState, InferRpcParams, InferRpcReturn, LightPeerEvents, LightPeerOptions, RpcSchema, SignalData } from './types';
+import type { ConnectionState, InferRpcReturn, LightPeerEvents, LightPeerOptions, RpcSchema, SignalData } from './types';
 export declare class LightPeer<TLocalSchema extends RpcSchema = RpcSchema, TRemoteSchema extends RpcSchema = RpcSchema> extends EventEmitter {
     private pc;
     private rpcEngine;
@@ -48,10 +48,10 @@ export declare class LightPeer<TLocalSchema extends RpcSchema = RpcSchema, TRemo
      */
     handleSignal(signal: SignalData): Promise<void>;
     /**
-     * Perform an RPC call to the remote peer.
+     * Perform an RPC call to the remote peer with binary Uint8Array data.
      * Queues call seamlessly if disconnected or connecting, sending once reconnected.
      */
-    call<K extends keyof TRemoteSchema & string>(method: K, ...args: InferRpcParams<TRemoteSchema, K>): Promise<InferRpcReturn<TRemoteSchema, K>>;
+    call<K extends keyof TRemoteSchema & string>(method: K, data?: Uint8Array): Promise<InferRpcReturn<TRemoteSchema, K>>;
     /**
      * Dynamically register or update a local RPC handler.
      */
@@ -65,21 +65,21 @@ export declare class LightPeer<TLocalSchema extends RpcSchema = RpcSchema, TRemo
      */
     removeHandler(method: string): void;
     /**
-     * Send an unreliable datagram to the remote peer.
+     * Send an unreliable datagram with binary Uint8Array payload.
      */
-    sendDatagram(topic: string, payload: any): boolean;
+    sendDatagram(topic: string, payload: Uint8Array): boolean;
     /**
-     * Send raw datagram buffer or string.
+     * Send raw datagram buffer.
      */
-    sendRawDatagram(data: string | ArrayBuffer | Uint8Array): boolean;
+    sendRawDatagram(data: ArrayBuffer | Uint8Array): boolean;
     /**
      * Subscribe to incoming datagrams for a specific topic.
      */
-    onDatagram(topic: string, callback: (payload: any, timestamp: number) => void): () => void;
+    onDatagram(topic: string, callback: (payload: Uint8Array, timestamp: number) => void): () => void;
     /**
      * Unsubscribe from datagrams for a specific topic.
      */
-    offDatagram(topic: string, callback: (payload: any, timestamp: number) => void): void;
+    offDatagram(topic: string, callback: (payload: Uint8Array, timestamp: number) => void): void;
     /**
      * Close connection, reject queued/pending calls, and free resources.
      */

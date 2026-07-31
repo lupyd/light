@@ -21,11 +21,14 @@ This document provides guidelines, architectural details, and strict requirement
 src/
 ├── index.ts           # Primary package entry point and exports
 ├── peer.ts            # LightPeer class, RTCPeerConnection lifecycle & auto-reconnect state machine
-├── rpc.ts             # RpcEngine: request-response matching, call queuing, timeout & error handling
-├── datagram.ts        # DatagramEngine: unreliable pub/sub messaging engine
+├── rpc.ts             # RpcEngine: Protobuf binary request-response matching & call queuing
+├── datagram.ts        # DatagramEngine: Protobuf binary unreliable pub/sub messaging engine
+├── proto/
+│   ├── protocol.proto # Protocol Buffers schema file
+│   └── protocol.ts    # Generated TS interfaces and Protobuf binary encoders/decoders
 ├── webrtc-adapter.ts  # Environment detection (browser native vs werift in Node/Bun)
-├── errors.ts          # Custom error hierarchy (LightRPCError, RpcTimeoutError, MaxRetriesExceededError, etc.)
-└── types.ts           # Protocol message interfaces, schema generic helpers, and peer events
+├── errors.ts          # Custom error hierarchy
+└── types.ts           # Protocol message interfaces and generic helpers
 ```
 
 ---

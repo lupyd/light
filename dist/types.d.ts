@@ -1,7 +1,6 @@
-export type RpcFunction = (...args: any[]) => any;
+export type RpcFunction = (data: Uint8Array) => Uint8Array | Promise<Uint8Array>;
 export type RpcSchema = Record<string, RpcFunction>;
-export type InferRpcParams<TSchema extends RpcSchema, K extends keyof TSchema> = TSchema[K] extends (...args: infer P) => any ? P : never;
-export type InferRpcReturn<TSchema extends RpcSchema, K extends keyof TSchema> = TSchema[K] extends (...args: any[]) => infer R ? Awaited<R> : never;
+export type InferRpcReturn<TSchema extends RpcSchema, K extends keyof TSchema> = TSchema[K] extends (data: Uint8Array) => infer R ? Awaited<R> : Uint8Array;
 export type SignalData = {
     type: 'offer';
     sdp: string;
@@ -69,36 +68,6 @@ export interface LightPeerOptions<TLocalSchema extends RpcSchema = RpcSchema, TR
      */
     reconnectTimeout?: number;
 }
-export interface RpcRequestMessage {
-    type: 'rpc_request';
-    id: string;
-    method: string;
-    params: any[];
-}
-export interface RpcResponseMessageSuccess {
-    type: 'rpc_response';
-    id: string;
-    result: any;
-    error?: undefined;
-}
-export interface RpcResponseMessageError {
-    type: 'rpc_response';
-    id: string;
-    result?: undefined;
-    error: {
-        code: string;
-        message: string;
-        data?: any;
-    };
-}
-export type RpcResponseMessage = RpcResponseMessageSuccess | RpcResponseMessageError;
-export type RpcMessage = RpcRequestMessage | RpcResponseMessage;
-export interface DatagramMessage {
-    type: 'datagram';
-    topic: string;
-    payload: any;
-    timestamp: number;
-}
 export interface LightPeerEvents<TLocalSchema extends RpcSchema = RpcSchema, TRemoteSchema extends RpcSchema = RpcSchema> {
     signal: (signal: SignalData) => void;
     connectionStateChange: (state: ConnectionState) => void;
@@ -109,7 +78,7 @@ export interface LightPeerEvents<TLocalSchema extends RpcSchema = RpcSchema, TRe
     error: (err: Error) => void;
     datagram: (event: {
         topic: string;
-        payload: any;
+        payload: Uint8Array;
         timestamp: number;
     }) => void;
 }

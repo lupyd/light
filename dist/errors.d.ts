@@ -1,7 +1,7 @@
 export declare class LightRPCError extends Error {
     readonly code: string;
-    readonly data?: any;
-    constructor(message: string, code?: string, data?: any);
+    readonly data?: unknown;
+    constructor(message: string, code?: string, data?: unknown);
 }
 export declare class RpcTimeoutError extends LightRPCError {
     constructor(method: string, timeoutMs: number);
@@ -10,7 +10,7 @@ export declare class MethodNotFoundError extends LightRPCError {
     constructor(method: string);
 }
 export declare class RpcExecutionError extends LightRPCError {
-    constructor(method: string, remoteMessage: string, remoteCode?: string, data?: any);
+    constructor(method: string, remoteMessage: string, remoteCode?: string, data?: unknown);
 }
 export declare class ConnectionClosedError extends LightRPCError {
     constructor(reason?: string);

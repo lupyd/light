@@ -1,8 +1,8 @@
 export class LightRPCError extends Error {
   public readonly code: string;
-  public readonly data?: any;
+  public readonly data?: unknown;
 
-  constructor(message: string, code = 'INTERNAL_ERROR', data?: any) {
+  constructor(message: string, code = 'INTERNAL_ERROR', data?: unknown) {
     super(message);
     this.name = 'LightRPCError';
     this.code = code;
@@ -26,7 +26,7 @@ export class MethodNotFoundError extends LightRPCError {
 }
 
 export class RpcExecutionError extends LightRPCError {
-  constructor(method: string, remoteMessage: string, remoteCode = 'REMOTE_EXECUTION_ERROR', data?: any) {
+  constructor(method: string, remoteMessage: string, remoteCode = 'REMOTE_EXECUTION_ERROR', data?: unknown) {
     super(`RPC method '${method}' failed on remote peer: ${remoteMessage}`, remoteCode, data);
     this.name = 'RpcExecutionError';
   }

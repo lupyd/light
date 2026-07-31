@@ -1,3 +1,4 @@
+import { decodeDatagramMessage, encodeDatagramMessage, normalizeRawMessage, } from './proto/protocol';
 export class DatagramEngine {
     channel = null;
     topicListeners = new Map();
@@ -11,24 +12,28 @@ export class DatagramEngine {
         }
         this.channel = channel;
         if (this.channel) {
+            try {
+                this.channel.binaryType = 'arraybuffer';
+            }
+            catch { }
             this.channel.onmessage = (event) => this.handleMessage(event.data);
         }
     }
     /**
-     * Send an unreliable datagram with a topic and payload.
+     * Send an unreliable datagram with a topic and binary Uint8Array payload.
      */
     sendDatagram(topic, payload) {
         if (!this.channel || this.channel.readyState !== 'open') {
             return false;
         }
-        const message = {
-            type: 'datagram',
-            topic,
-            payload,
-            timestamp: Date.now(),
-        };
+        const binaryPayload = payload || new Uint8Array(0);
         try {
-            this.channel.send(JSON.stringify(message));
+            const binaryMsg = encodeDatagramMessage({
+                topic,
+                payload: binaryPayload,
+                timestamp: Date.now(),
+            });
+            this.channel.send(binaryMsg);
             return true;
         }
         catch {
@@ -36,7 +41,7 @@ export class DatagramEngine {
         }
     }
     /**
-     * Send a raw buffer or string datagram directly over the channel.
+     * Send a raw buffer datagram directly over the channel.
      */
     sendRawDatagram(data) {
         if (!this.channel || this.channel.readyState !== 'open') {
@@ -86,50 +91,39 @@ export class DatagramEngine {
         };
     }
     handleMessage(rawMessage) {
-        let message;
         try {
-            let str;
-            if (typeof rawMessage === 'string') {
-                str = rawMessage;
-            }
-            else if (rawMessage instanceof Uint8Array || ArrayBuffer.isView(rawMessage)) {
-                str = new TextDecoder().decode(rawMessage);
-            }
-            else if (rawMessage instanceof ArrayBuffer) {
-                str = new TextDecoder().decode(rawMessage);
-            }
-            else {
-                str = String(rawMessage);
-            }
-            message = JSON.parse(str);
-        }
-        catch {
-            // Not a JSON datagram message (could be raw data)
-            return;
-        }
-        if (message && message.type === 'datagram') {
-            const { topic, payload, timestamp } = message;
-            // Call topic listeners
-            const listeners = this.topicListeners.get(topic);
-            if (listeners) {
-                for (const callback of listeners) {
+            const bytes = normalizeRawMessage(rawMessage);
+            if (bytes.length === 0)
+                return;
+            const message = decodeDatagramMessage(bytes);
+            if (message && message.topic) {
+                const { topic, payload, timestamp } = message;
+                const binaryPayload = payload || new Uint8Array(0);
+                // Call topic listeners
+                const listeners = this.topicListeners.get(topic);
+                if (listeners) {
+                    for (const callback of listeners) {
+                        try {
+                            callback(binaryPayload, timestamp);
+                        }
+                        catch (e) {
+                            console.error(`Error in datagram listener for topic '${topic}':`, e);
+                        }
+                    }
+                }
+                // Call global listeners
+                for (const globalListener of this.globalListeners) {
                     try {
-                        callback(payload, timestamp);
+                        globalListener({ topic, payload: binaryPayload, timestamp });
                     }
                     catch (e) {
-                        console.error(`Error in datagram listener for topic '${topic}':`, e);
+                        console.error(`Error in global datagram listener:`, e);
                     }
                 }
             }
-            // Call global listeners
-            for (const globalListener of this.globalListeners) {
-                try {
-                    globalListener({ topic, payload, timestamp });
-                }
-                catch (e) {
-                    console.error(`Error in global datagram listener:`, e);
-                }
-            }
+        }
+        catch {
+            return;
         }
     }
     destroy() {

@@ -31,7 +31,8 @@ export function getWebRTCAdapter(overrideAdapter) {
     }
     // Node.js / Bun runtime fallback using werift
     try {
-        const req = typeof require !== 'undefined' ? require : globalThis.require;
+        const globalReq = globalThis.require;
+        const req = typeof require !== 'undefined' ? require : typeof globalReq === 'function' ? globalReq : null;
         if (typeof req === 'function') {
             const werift = req('werift');
             return {
