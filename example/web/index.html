@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Light WebRTC RPC Browser Client</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 20px; line-height: 1.5; }
+    
+    .container { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 15px; }
+    h1 { font-size: 1.5rem; color: var(--primary); display: flex; align-items: center; gap: 10px; }
+    
+    .badge { padding: 4px 12px; border-radius: 9999px; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; background: var(--border); color: var(--muted); }
+    .badge.connected { background: #14532d; color: var(--success); }
+    .badge.connecting { background: #78350f; color: var(--warning); }
+    .badge.failed { background: #7f1d1d; color: var(--danger); }
+
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+
+    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
+    .card h2 { font-size: 1.1rem; color: var(--primary); border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 5px; }
+
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    label { font-size: 0.85rem; color: var(--muted); font-weight: 500; }
+    input, select, textarea { background: #0f172a; border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 6px; font-size: 0.9rem; outline: none; }
+    input:focus, select:focus, textarea:focus { border-color: var(--primary); }
+
+    .checkbox-group { display: flex; align-items: center; gap: 8px; }
+    .checkbox-group input { cursor: pointer; }
+
+    button { background: var(--primary); color: #000; font-weight: 600; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: var(--primary-hover); color: #fff; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover { background: #dc2626; }
+
+    .console { background: #020617; border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.85rem; height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+    .log-line { border-bottom: 1px solid #1e293b; padding-bottom: 2px; }
+    .log-info { color: var(--primary); }
+    .log-success { color: var(--success); }
+    .log-warn { color: var(--warning); }
+    .log-error { color: var(--danger); }
+
+    pre { background: #090d16; padding: 10px; border-radius: 6px; overflow-x: auto; color: #a5f3fc; font-size: 0.85rem; max-height: 150px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>⚡ Light WebRTC RPC Demo</h1>
+      <span id="status-badge" class="badge">Disconnected</span>
+    </header>
+
+    <div class="grid">
+      <!-- Connection Panel -->
+      <div class="card">
+        <h2>🔌 Connection Settings</h2>
+        <div class="form-group">
+          <label for="signaling-url">Signaling Server URL</label>
+          <input type="text" id="signaling-url" value="ws://localhost:3000/ws">
+        </div>
+        <div class="form-group">
+          <label for="my-id">My Peer ID</label>
+          <input type="text" id="my-id" value="web-client-1">
+        </div>
+        <div class="form-group">
+          <label for="target-id">Target Peer ID</label>
+          <input type="text" id="target-id" value="web-client-2">
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="is-initiator" checked>
+          <label for="is-initiator">Initiate WebRTC Offer</label>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button id="btn-connect" style="flex: 1;">Connect Peer</button>
+          <button id="btn-disconnect" class="btn-danger" disabled>Disconnect</button>
+        </div>
+      </div>
+
+      <!-- RPC Panel -->
+      <div class="card">
+        <h2>📡 Remote RPC Invocation</h2>
+        <div class="form-group">
+          <label for="rpc-method">Method</label>
+          <select id="rpc-method">
+            <option value="ping">ping()</option>
+            <option value="echo">echo(message)</option>
+            <option value="add">add(a, b)</option>
+            <option value="getSystemInfo">getSystemInfo()</option>
+            <option value="fetchQuote">fetchQuote()</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="rpc-args">Arguments (JSON array)</label>
+          <input type="text" id="rpc-args" value="[]" placeholder='e.g. ["Hello"] or [10, 20]'>
+        </div>
+        <button id="btn-call-rpc" disabled>Execute RPC Call</button>
+        <div>
+          <label>Result:</label>
+          <pre id="rpc-result">// Result will appear here...</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Datagram & Activity Console -->
+    <div class="grid">
+      <div class="card">
+        <h2>📦 Send Unreliable Datagram</h2>
+        <div class="form-group">
+          <label for="datagram-topic">Topic</label>
+          <input type="text" id="datagram-topic" value="mouse_move">
+        </div>
+        <div class="form-group">
+          <label for="datagram-payload">Payload (JSON or string)</label>
+          <input type="text" id="datagram-payload" value='{"x": 150, "y": 300, "speed": 12}'>
+        </div>
+        <button id="btn-send-datagram" disabled>Send Datagram</button>
+      </div>
+
+      <div class="card">
+        <h2>📜 Event & Activity Log</h2>
+        <div id="console-log" class="console">
+          <div class="log-line">System initialized. Click "Connect Peer" to start.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/client.js"></script>
+</body>
+</html>

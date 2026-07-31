@@ -1,0 +1,48 @@
+{
+  "name": "light",
+  "version": "1.0.0",
+  "description": "Reliable WebRTC RPC and Datagrams library for Web, Node.js, and Bun",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test",
+    "example:server": "bun run example/server.ts",
+    "example:client-a": "bun run example/client-a.ts",
+    "example:client-b": "bun run example/client-b.ts",
+    "example:cli": "bun run example/cli-client.ts",
+    "example:web": "bun run example/web/server.ts"
+  },
+  "keywords": [
+    "webrtc",
+    "rpc",
+    "datagram",
+    "p2p",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "selfsigned": "^5.5.0",
+    "werift": "^0.24.2",
+    "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/selfsigned": "^2.1.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^7.0.2"
+  }
+}
