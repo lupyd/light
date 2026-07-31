@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import type { ConnectionState, InferRpcParams, InferRpcReturn, LightPeerEvents, LightPeerOptions, RpcSchema, SignalData } from './types.js';
+import type { ConnectionState, InferRpcParams, InferRpcReturn, LightPeerEvents, LightPeerOptions, RpcSchema, SignalData } from './types';
 export declare class LightPeer<TLocalSchema extends RpcSchema = RpcSchema, TRemoteSchema extends RpcSchema = RpcSchema> extends EventEmitter {
     private pc;
     private rpcEngine;

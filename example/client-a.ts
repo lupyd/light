@@ -1,7 +1,7 @@
 import WebSocket from 'ws';
-import { LightPeer } from '../src/index.js';
-import type { ClientASchema, ClientBSchema } from './schema.js';
-import { allowSelfSignedCertificates } from './ssl.js';
+import { LightPeer } from '../src/index';
+import type { ClientASchema, ClientBSchema } from './schema';
+import { allowSelfSignedCertificates } from './ssl';
 
 allowSelfSignedCertificates();
 

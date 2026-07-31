@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { getDummySSLCertificate } from '../ssl.js';
+import { getDummySSLCertificate } from '../ssl';
 
 const USE_SSL = process.env.USE_SSL === 'true';
 const PORT = Number(process.env.PORT) || Number(process.env.WEB_PORT) || 3000;

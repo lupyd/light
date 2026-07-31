@@ -1,7 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import { WebSocketServer, WebSocket } from 'ws';
-import { getDummySSLCertificate } from './ssl.js';
+import { getDummySSLCertificate } from './ssl';
 
 const USE_SSL = process.env.USE_SSL === 'true';
 const PORT = Number(process.env.PORT) || 8099;

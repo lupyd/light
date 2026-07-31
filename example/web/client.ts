@@ -1,5 +1,5 @@
-import { LightPeer } from '../../src/index.js';
-import type { CommonPeerSchema } from '../schema.js';
+import { LightPeer } from '../../src/index';
+import type { CommonPeerSchema } from '../schema';
 
 // DOM Elements
 const statusBadge = document.getElementById('status-badge') as HTMLSpanElement;

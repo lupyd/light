@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
-import { DatagramEngine } from './datagram.js';
-import { ConnectionClosedError, LightRPCError, MaxRetriesExceededError } from './errors.js';
-import { RpcEngine } from './rpc.js';
+import { DatagramEngine } from './datagram';
+import { ConnectionClosedError, LightRPCError, MaxRetriesExceededError } from './errors';
+import { RpcEngine } from './rpc';
 import type {
   ConnectionState,
   InferRpcParams,
@@ -10,8 +10,8 @@ import type {
   LightPeerOptions,
   RpcSchema,
   SignalData,
-} from './types.js';
-import { getWebRTCAdapter } from './webrtc-adapter.js';
+} from './types';
+import { getWebRTCAdapter } from './webrtc-adapter';
 
 export class LightPeer<
   TLocalSchema extends RpcSchema = RpcSchema,

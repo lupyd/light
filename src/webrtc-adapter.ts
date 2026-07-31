@@ -1,4 +1,4 @@
-import type { WebRTCAdapter } from './types.js';
+import type { WebRTCAdapter } from './types';
 
 let customAdapter: WebRTCAdapter | null = null;
 

@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events';
-import { DatagramEngine } from './datagram.js';
-import { ConnectionClosedError, LightRPCError, MaxRetriesExceededError } from './errors.js';
-import { RpcEngine } from './rpc.js';
-import { getWebRTCAdapter } from './webrtc-adapter.js';
+import { DatagramEngine } from './datagram';
+import { ConnectionClosedError, LightRPCError, MaxRetriesExceededError } from './errors';
+import { RpcEngine } from './rpc';
+import { getWebRTCAdapter } from './webrtc-adapter';
 export class LightPeer extends EventEmitter {
     pc;
     rpcEngine;

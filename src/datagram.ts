@@ -1,4 +1,4 @@
-import type { DatagramMessage } from './types.js';
+import type { DatagramMessage } from './types';
 
 export type DatagramCallback = (payload: any, timestamp: number) => void;
 

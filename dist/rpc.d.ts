@@ -1,4 +1,4 @@
-import type { InferRpcParams, InferRpcReturn, RpcSchema } from './types.js';
+import type { InferRpcParams, InferRpcReturn, RpcSchema } from './types';
 export declare class RpcEngine<TLocalSchema extends RpcSchema = RpcSchema, TRemoteSchema extends RpcSchema = RpcSchema> {
     private handlers;
     private pendingRequests;

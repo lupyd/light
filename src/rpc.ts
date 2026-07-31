@@ -4,7 +4,7 @@ import {
   MethodNotFoundError,
   RpcExecutionError,
   RpcTimeoutError,
-} from './errors.js';
+} from './errors';
 import type {
   InferRpcParams,
   InferRpcReturn,
@@ -14,7 +14,7 @@ import type {
   RpcResponseMessageError,
   RpcResponseMessageSuccess,
   RpcSchema,
-} from './types.js';
+} from './types';
 
 interface PendingRequest {
   resolve: (value: any) => void;

@@ -5,7 +5,7 @@ import {
   MethodNotFoundError,
   RpcExecutionError,
   RpcTimeoutError,
-} from '../src/index.js';
+} from '../src/index';
 
 // Define schemas for two peers
 type PeerASchema = {

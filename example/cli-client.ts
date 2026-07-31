@@ -1,8 +1,8 @@
 import readline from 'node:readline';
 import WebSocket from 'ws';
-import { LightPeer } from '../src/index.js';
-import type { CommonPeerSchema } from './schema.js';
-import { allowSelfSignedCertificates } from './ssl.js';
+import { LightPeer } from '../src/index';
+import type { CommonPeerSchema } from './schema';
+import { allowSelfSignedCertificates } from './ssl';
 
 allowSelfSignedCertificates();
 

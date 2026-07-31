@@ -1,4 +1,4 @@
-import { ConnectionClosedError, LightRPCError, MethodNotFoundError, RpcExecutionError, RpcTimeoutError, } from './errors.js';
+import { ConnectionClosedError, LightRPCError, MethodNotFoundError, RpcExecutionError, RpcTimeoutError, } from './errors';
 export class RpcEngine {
     handlers = new Map();
     pendingRequests = new Map();

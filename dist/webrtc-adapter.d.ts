@@ -1,4 +1,4 @@
-import type { WebRTCAdapter } from './types.js';
+import type { WebRTCAdapter } from './types';
 /**
  * Explicitly set a global WebRTC adapter (useful for custom polyfills).
  */
