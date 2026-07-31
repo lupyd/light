@@ -2,23 +2,23 @@ syntax = "proto3";
 
 package light.protocol;
 
-// RPC Error details
+// RPC Error details with u32 code
 message RpcError {
-  string code = 1;
+  uint32 code = 1;
   string message = 2;
   bytes data = 3;
 }
 
-// RPC Request message with single binary payload
+// RPC Request message with u32 request id
 message RpcRequest {
-  string id = 1;
+  uint32 id = 1;
   string method = 2;
   bytes payload = 3;
 }
 
-// RPC Response message with single binary result
+// RPC Response message with u32 request id
 message RpcResponse {
-  string id = 1;
+  uint32 id = 1;
   bytes result = 2;
   RpcError error = 3;
 }

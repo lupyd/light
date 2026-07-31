@@ -1,4 +1,4 @@
-import { decodeDatagramMessage, encodeDatagramMessage, normalizeRawMessage, } from './proto/protocol';
+import { decodeDatagramMessage, encodeDatagramMessage, EMPTY_BYTES, normalizeRawMessage, } from './proto/protocol';
 export class DatagramEngine {
     channel = null;
     topicListeners = new Map();
@@ -26,7 +26,7 @@ export class DatagramEngine {
         if (!this.channel || this.channel.readyState !== 'open') {
             return false;
         }
-        const binaryPayload = payload || new Uint8Array(0);
+        const binaryPayload = payload || EMPTY_BYTES;
         try {
             const binaryMsg = encodeDatagramMessage({
                 topic,
@@ -98,7 +98,7 @@ export class DatagramEngine {
             const message = decodeDatagramMessage(bytes);
             if (message && message.topic) {
                 const { topic, payload, timestamp } = message;
-                const binaryPayload = payload || new Uint8Array(0);
+                const binaryPayload = payload || EMPTY_BYTES;
                 // Call topic listeners
                 const listeners = this.topicListeners.get(topic);
                 if (listeners) {

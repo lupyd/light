@@ -7,6 +7,7 @@ export declare class RpcEngine<TLocalSchema extends RpcSchema = RpcSchema, TRemo
     private channel;
     private defaultTimeout;
     private isDestroyed;
+    private nextRequestId;
     constructor(handlers?: Partial<TLocalSchema> | TLocalSchema, defaultTimeout?: number);
     /**
      * Set or update the active RTCDataChannel used for RPC communication.

@@ -1,17 +1,26 @@
 import protobuf from 'protobufjs';
+export const EMPTY_BYTES = new Uint8Array(0);
+export const RPC_ERROR_CODES = {
+    INTERNAL_ERROR: 1,
+    TIMEOUT: 2,
+    METHOD_NOT_FOUND: 3,
+    REMOTE_EXECUTION_ERROR: 4,
+    CONNECTION_CLOSED: 5,
+    MAX_RETRIES_EXCEEDED: 6,
+};
 // Build Protobuf Root Schema
 const root = new protobuf.Root();
 const ns = root.define('light.protocol');
 ns.add(new protobuf.Type('RpcError')
-    .add(new protobuf.Field('code', 1, 'string'))
+    .add(new protobuf.Field('code', 1, 'uint32'))
     .add(new protobuf.Field('message', 2, 'string'))
     .add(new protobuf.Field('data', 3, 'bytes', 'optional')));
 ns.add(new protobuf.Type('RpcRequest')
-    .add(new protobuf.Field('id', 1, 'string'))
+    .add(new protobuf.Field('id', 1, 'uint32'))
     .add(new protobuf.Field('method', 2, 'string'))
     .add(new protobuf.Field('payload', 3, 'bytes', 'optional')));
 ns.add(new protobuf.Type('RpcResponse')
-    .add(new protobuf.Field('id', 1, 'string'))
+    .add(new protobuf.Field('id', 1, 'uint32'))
     .add(new protobuf.Field('result', 2, 'bytes', 'optional'))
     .add(new protobuf.Field('error', 3, 'RpcError', 'optional')));
 ns.add(new protobuf.Type('RpcMessage')
@@ -57,6 +66,6 @@ export function normalizeRawMessage(rawMessage) {
     if (ArrayBuffer.isView(rawMessage)) {
         return new Uint8Array(rawMessage.buffer, rawMessage.byteOffset, rawMessage.byteLength);
     }
-    return new Uint8Array(0);
+    return EMPTY_BYTES;
 }
 //# sourceMappingURL=protocol.js.map

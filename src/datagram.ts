@@ -1,6 +1,7 @@
 import {
   decodeDatagramMessage,
   encodeDatagramMessage,
+  EMPTY_BYTES,
   normalizeRawMessage,
 } from './proto/protocol';
 
@@ -37,7 +38,7 @@ export class DatagramEngine {
       return false;
     }
 
-    const binaryPayload = payload || new Uint8Array(0);
+    const binaryPayload = payload || EMPTY_BYTES;
 
     try {
       const binaryMsg = encodeDatagramMessage({
@@ -117,7 +118,7 @@ export class DatagramEngine {
 
       if (message && message.topic) {
         const { topic, payload, timestamp } = message;
-        const binaryPayload = payload || new Uint8Array(0);
+        const binaryPayload = payload || EMPTY_BYTES;
 
         // Call topic listeners
         const listeners = this.topicListeners.get(topic);

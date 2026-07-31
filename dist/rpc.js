@@ -1,5 +1,5 @@
 import { ConnectionClosedError, LightRPCError, MethodNotFoundError, RpcExecutionError, RpcTimeoutError, } from './errors';
-import { decodeRpcMessage, encodeRpcMessage, normalizeRawMessage, } from './proto/protocol';
+import { decodeRpcMessage, encodeRpcMessage, EMPTY_BYTES, normalizeRawMessage, RPC_ERROR_CODES, } from './proto/protocol';
 export class RpcEngine {
     handlers = new Map();
     pendingRequests = new Map();
@@ -8,6 +8,8 @@ export class RpcEngine {
     channel = null;
     defaultTimeout;
     isDestroyed = false;
+    // Fast u32 atomic counter
+    nextRequestId = 1;
     constructor(handlers, defaultTimeout = 10000) {
         this.defaultTimeout = defaultTimeout;
         if (handlers) {
@@ -97,7 +99,7 @@ export class RpcEngine {
             throw new ConnectionClosedError('RPC engine is destroyed');
         }
         const requestId = this.generateId();
-        const payload = data || new Uint8Array(0);
+        const payload = data || EMPTY_BYTES;
         return new Promise((resolve, reject) => {
             const resolver = (val) => resolve(val);
             if (this.channel && this.channel.readyState === 'open') {
@@ -182,7 +184,7 @@ export class RpcEngine {
                 response: {
                     id: req.id,
                     error: {
-                        code: 'METHOD_NOT_FOUND',
+                        code: RPC_ERROR_CODES.METHOD_NOT_FOUND,
                         message: `RPC method '${req.method}' is not registered on receiver peer`,
                     },
                 },
@@ -191,9 +193,9 @@ export class RpcEngine {
             return;
         }
         try {
-            const payload = req.payload || new Uint8Array(0);
+            const payload = req.payload || EMPTY_BYTES;
             const rawResult = await handler(payload);
-            const binaryResult = rawResult instanceof Uint8Array ? rawResult : new Uint8Array(0);
+            const binaryResult = rawResult instanceof Uint8Array ? rawResult : EMPTY_BYTES;
             const successMsg = {
                 response: {
                     id: req.id,
@@ -203,14 +205,14 @@ export class RpcEngine {
             this.sendRaw(successMsg);
         }
         catch (err) {
-            const errCode = err?.code || 'REMOTE_EXECUTION_ERROR';
+            const errCode = err?.code || RPC_ERROR_CODES.REMOTE_EXECUTION_ERROR;
             const errData = err?.data;
             const errorMessage = err instanceof Error ? err.message : String(err);
             const errorMsg = {
                 response: {
                     id: req.id,
                     error: {
-                        code: errCode,
+                        code: typeof errCode === 'number' ? errCode : RPC_ERROR_CODES.REMOTE_EXECUTION_ERROR,
                         message: errorMessage,
                         data: errData instanceof Uint8Array ? errData : undefined,
                     },
@@ -226,7 +228,7 @@ export class RpcEngine {
         clearTimeout(pending.timer);
         this.pendingRequests.delete(resp.id);
         if (resp.error && resp.error.code) {
-            if (resp.error.code === 'METHOD_NOT_FOUND') {
+            if (resp.error.code === RPC_ERROR_CODES.METHOD_NOT_FOUND) {
                 pending.reject(new MethodNotFoundError(pending.method));
             }
             else {
@@ -234,7 +236,7 @@ export class RpcEngine {
             }
         }
         else {
-            const resultData = resp.result || new Uint8Array(0);
+            const resultData = resp.result || EMPTY_BYTES;
             pending.resolve(resultData);
         }
     }
@@ -253,7 +255,11 @@ export class RpcEngine {
         }
     }
     generateId() {
-        return Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+        const id = this.nextRequestId;
+        this.nextRequestId = (this.nextRequestId + 1) >>> 0;
+        if (this.nextRequestId === 0)
+            this.nextRequestId = 1;
+        return id;
     }
     /**
      * Cancel all pending/queued requests and clean up.

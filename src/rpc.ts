@@ -8,7 +8,9 @@ import {
 import {
   decodeRpcMessage,
   encodeRpcMessage,
+  EMPTY_BYTES,
   normalizeRawMessage,
+  RPC_ERROR_CODES,
   type ProtoRpcMessage,
   type ProtoRpcRequest,
   type ProtoRpcResponse,
@@ -26,7 +28,7 @@ interface PendingRequest {
 }
 
 interface QueuedRequest {
-  id: string;
+  id: number; // u32 ID
   method: string;
   payload: Uint8Array;
   resolve: (value: Uint8Array) => void;
@@ -38,12 +40,15 @@ export class RpcEngine<
   TRemoteSchema extends RpcSchema = RpcSchema
 > {
   private handlers: Map<string, (data: Uint8Array) => Uint8Array | Promise<Uint8Array>> = new Map();
-  private pendingRequests: Map<string, PendingRequest> = new Map();
+  private pendingRequests: Map<number, PendingRequest> = new Map();
   private queuedRequests: QueuedRequest[] = [];
   private outboundResponsesQueue: ProtoRpcMessage[] = [];
   private channel: RTCDataChannel | null = null;
   private defaultTimeout: number;
   private isDestroyed = false;
+
+  // Fast u32 atomic counter
+  private nextRequestId = 1;
 
   constructor(handlers?: Partial<TLocalSchema> | TLocalSchema, defaultTimeout = 10000) {
     this.defaultTimeout = defaultTimeout;
@@ -150,7 +155,7 @@ export class RpcEngine<
     }
 
     const requestId = this.generateId();
-    const payload = data || new Uint8Array(0);
+    const payload = data || EMPTY_BYTES;
 
     return new Promise<InferRpcReturn<TRemoteSchema, K>>((resolve, reject) => {
       const resolver = (val: Uint8Array) => resolve(val as InferRpcReturn<TRemoteSchema, K>);
@@ -170,7 +175,7 @@ export class RpcEngine<
   }
 
   private sendRequest(
-    requestId: string,
+    requestId: number,
     method: string,
     payload: Uint8Array,
     resolve: (value: Uint8Array) => void,
@@ -249,7 +254,7 @@ export class RpcEngine<
         response: {
           id: req.id,
           error: {
-            code: 'METHOD_NOT_FOUND',
+            code: RPC_ERROR_CODES.METHOD_NOT_FOUND,
             message: `RPC method '${req.method}' is not registered on receiver peer`,
           },
         },
@@ -259,9 +264,9 @@ export class RpcEngine<
     }
 
     try {
-      const payload = req.payload || new Uint8Array(0);
+      const payload = req.payload || EMPTY_BYTES;
       const rawResult = await handler(payload);
-      const binaryResult = rawResult instanceof Uint8Array ? rawResult : new Uint8Array(0);
+      const binaryResult = rawResult instanceof Uint8Array ? rawResult : EMPTY_BYTES;
 
       const successMsg: ProtoRpcMessage = {
         response: {
@@ -271,7 +276,7 @@ export class RpcEngine<
       };
       this.sendRaw(successMsg);
     } catch (err) {
-      const errCode = (err as { code?: string })?.code || 'REMOTE_EXECUTION_ERROR';
+      const errCode = (err as { code?: number })?.code || RPC_ERROR_CODES.REMOTE_EXECUTION_ERROR;
       const errData = (err as { data?: unknown })?.data;
       const errorMessage = err instanceof Error ? err.message : String(err);
 
@@ -279,7 +284,7 @@ export class RpcEngine<
         response: {
           id: req.id,
           error: {
-            code: errCode,
+            code: typeof errCode === 'number' ? errCode : RPC_ERROR_CODES.REMOTE_EXECUTION_ERROR,
             message: errorMessage,
             data: errData instanceof Uint8Array ? errData : undefined,
           },
@@ -297,7 +302,7 @@ export class RpcEngine<
     this.pendingRequests.delete(resp.id);
 
     if (resp.error && resp.error.code) {
-      if (resp.error.code === 'METHOD_NOT_FOUND') {
+      if (resp.error.code === RPC_ERROR_CODES.METHOD_NOT_FOUND) {
         pending.reject(new MethodNotFoundError(pending.method));
       } else {
         pending.reject(
@@ -305,7 +310,7 @@ export class RpcEngine<
         );
       }
     } else {
-      const resultData = resp.result || new Uint8Array(0);
+      const resultData = resp.result || EMPTY_BYTES;
       pending.resolve(resultData);
     }
   }
@@ -323,8 +328,11 @@ export class RpcEngine<
     }
   }
 
-  private generateId(): string {
-    return Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+  private generateId(): number {
+    const id = this.nextRequestId;
+    this.nextRequestId = (this.nextRequestId + 1) >>> 0;
+    if (this.nextRequestId === 0) this.nextRequestId = 1;
+    return id;
   }
 
   /**
